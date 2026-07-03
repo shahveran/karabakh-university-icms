@@ -1,0 +1,21 @@
+steps:
+  # 1. Addım: Google Cloud Buildpacks vasitəsilə kodu (Python/Node.js) avtomatik yığmaq
+  - name: 'gcr.io/k8s-skaffold/pack'
+    args:
+      - 'build'
+      - 'gcr.io/$PROJECT_ID/karabakh-icms-app'
+      - '--builder'
+      - 'gcr.io/buildpacks/builder:v1'
+
+  # 2. Addım: Gemini API tətbiqini Cloud Run-a deploy etmək
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'karabakh-icms-service'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/karabakh-icms-app'
+      - '--region'
+      - 'europe-west1'
+      - '--allow-unauthenticated'
