@@ -1,0 +1,6 @@
+{
+  "name": "Qarabağ University Pedagogical ICMS",
+  "description": "An Instructional/Curriculum Content Management System for the Pedagogical Faculty of Qarabağ University to continuously align curriculum and syllabi with student and enterprise suggestions.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
