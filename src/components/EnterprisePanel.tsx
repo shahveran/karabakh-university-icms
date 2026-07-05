@@ -4,6 +4,7 @@ import { useLanguage } from '../LanguageContext';
 import { motion } from 'motion/react';
 import { Send, Building2, CheckCircle2, Clock, XCircle, AlertCircle, Sparkles, Plus, ChevronRight } from 'lucide-react';
 import Logo from './Logo';
+import { SearchableSelect } from './SearchableSelect';
 
 interface EnterprisePanelProps {
   currentUser: User;
@@ -232,38 +233,39 @@ export default function EnterprisePanel({
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
                 {language === 'AZ' ? 'İxtisas Proqramı *' : 'Curriculum Program *'}
               </label>
-              <select
+              <SearchableSelect
+                options={activePrograms.map(prog => ({
+                  value: prog.id,
+                  label: `${prog.id} (${prog.totalCredits || 240} ECTS) — ${prog.name}`
+                }))}
                 value={selectedProgramId}
-                onChange={e => {
-                  setSelectedProgramId(e.target.value);
+                onChange={val => {
+                  setSelectedProgramId(val);
                   setSelectedSyllabusId('');
                 }}
-                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-xs transition-all bg-white text-slate-700 font-semibold cursor-pointer"
-              >
-                {activePrograms.map(prog => (
-                  <option key={prog.id} value={prog.id}>
-                    {prog.id} ({prog.totalCredits || 240} ECTS) — {prog.name}
-                  </option>
-                ))}
-              </select>
+                placeholder={language === 'AZ' ? 'İxtisas Proqramı Seçin' : 'Select Specialty Program'}
+                searchPlaceholder={language === 'AZ' ? 'Axtar...' : 'Search...'}
+                required
+              />
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
                 {language === 'AZ' ? 'Aid Olduğu Fənn (Sillabus)' : 'Related Course (Syllabus)'} <span className="text-slate-400 text-[10px] font-normal">({language === 'AZ' ? 'Könüllü' : 'Optional'})</span>
               </label>
-              <select
+              <SearchableSelect
+                options={[
+                  { value: '', label: language === 'AZ' ? 'Ümumi ixtisas proqramı üzrə' : 'General program review' },
+                  ...filteredSyllabi.map(syll => ({
+                    value: syll.id,
+                    label: `${syll.code} (${syll.credits || 6} ECTS) — ${syll.name}`
+                  }))
+                ]}
                 value={selectedSyllabusId}
-                onChange={e => setSelectedSyllabusId(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-xs transition-all bg-white text-slate-700 font-medium cursor-pointer"
-              >
-                <option value="">{language === 'AZ' ? 'Ümumi ixtisas proqramı üzrə' : 'General program review'}</option>
-                {filteredSyllabi.map(syll => (
-                  <option key={syll.id} value={syll.id}>
-                    {syll.code} ({syll.credits || 6} ECTS) — {syll.name}
-                  </option>
-                ))}
-              </select>
+                onChange={val => setSelectedSyllabusId(val)}
+                placeholder={language === 'AZ' ? 'Fənn Seçin' : 'Select Subject'}
+                searchPlaceholder={language === 'AZ' ? 'Axtar...' : 'Search...'}
+              />
             </div>
 
             <div>

@@ -3,11 +3,12 @@ import { useLanguage } from '../LanguageContext';
 import { Program, Syllabus, SuggestionCase, User, AIAnalysisResponse, ReferenceDocument, ReferenceDocMatch } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import DocumentReader from './DocumentReader';
+import { SearchableSelect } from './SearchableSelect';
 import { 
-  Plus, BookOpen, Layers, Sparkles, AlertCircle, CheckCircle2, 
-  XCircle, Clock, Wand2, History, Edit, FileText, Check, ChevronRight,
-  Search, ChevronDown, Trash2, FileUp, Database, Download, FileSpreadsheet
-} from 'lucide-react';
+   Plus, BookOpen, Layers, Sparkles, AlertCircle, CheckCircle2, 
+   XCircle, Clock, Wand2, History, Edit, FileText, Check, ChevronRight,
+   Search, ChevronDown, Trash2, FileUp, Database, Download, FileSpreadsheet
+ } from 'lucide-react';
 
 interface ProgramHeadPanelProps {
   currentUser: User;
@@ -1133,12 +1134,18 @@ export default function ProgramHeadPanel({
                             {language === 'AZ' ? 'Word faylındakı məlumatların yazılacağı rəsmi ixtisas tədris planı' : 'The official specialty curriculum plan where document data will be written'}
                           </span>
                         </div>
-                        <select
+                        <SearchableSelect
+                          options={[
+                            { value: '', label: language === 'AZ' ? '+ Yeni Müstəqil İxtisas Proqramı Kimi Yarat' : '+ Create As New Custom Specialty Program' },
+                            ...unclaimedOfficialPrograms.map(p => ({
+                              value: p.id,
+                              label: `${p.id} (${p.totalCredits || 240} ECTS) — ${p.name}`
+                            }))
+                          ]}
                           value={selectedProgramIdForAdd}
-                          onChange={e => {
-                            const pId = e.target.value;
-                            setSelectedProgramIdForAdd(pId);
-                            const found = (programs || []).find(p => p.id === pId);
+                          onChange={val => {
+                            setSelectedProgramIdForAdd(val);
+                            const found = (programs || []).find(p => p.id === val);
                             if (found && parsedResult) {
                               setParsedResult({
                                 ...parsedResult,
@@ -1146,13 +1153,10 @@ export default function ProgramHeadPanel({
                               });
                             }
                           }}
-                          className="px-3 py-1.5 bg-white border border-emerald-250 rounded-xl text-xs focus:outline-none font-bold"
-                        >
-                          <option value="">{language === 'AZ' ? '+ Yeni Müstəqil İxtisas Proqramı Kimi Yarat' : '+ Create As New Custom Specialty Program'}</option>
-                          {unclaimedOfficialPrograms.map(p => (
-                            <option key={p.id} value={p.id}>{p.id} ({p.totalCredits || 240} ECTS) — {p.name}</option>
-                          ))}
-                        </select>
+                          placeholder={language === 'AZ' ? 'Proqram Seçin' : 'Select Program'}
+                          searchPlaceholder={language === 'AZ' ? 'Axtar...' : 'Search...'}
+                          className="min-w-[240px]"
+                        />
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-left">
@@ -1245,12 +1249,18 @@ export default function ProgramHeadPanel({
                 <form onSubmit={handleAddProgramSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4">
                   <div className="md:col-span-12">
                     <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'RƏSMİ İXTİSAS SEÇİMİ (KÖNÜLLÜ)' : 'OFFICIAL SPECIALTY SELECTION (OPTIONAL)'}</label>
-                    <select
+                    <SearchableSelect
+                      options={[
+                        { value: '', label: language === 'AZ' ? '+ Yeni Müstəqil İxtisas Proqramı Yarat' : '+ Create New Custom Specialty Program' },
+                        ...unclaimedOfficialPrograms.map(p => ({
+                          value: p.id,
+                          label: `${p.id} (${p.totalCredits || 240} ECTS) — ${p.name}`
+                        }))
+                      ]}
                       value={selectedProgramIdForAdd}
-                      onChange={e => {
-                        const pId = e.target.value;
-                        setSelectedProgramIdForAdd(pId);
-                        const found = (programs || []).find(p => p.id === pId);
+                      onChange={val => {
+                        setSelectedProgramIdForAdd(val);
+                        const found = (programs || []).find(p => p.id === val);
                         if (found) {
                           setProgName(found.name);
                           setProgDesc(found.description);
@@ -1261,13 +1271,9 @@ export default function ProgramHeadPanel({
                           setProgCredits(240);
                         }
                       }}
-                      className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-bold"
-                    >
-                      <option value="">{language === 'AZ' ? '+ Yeni Müstəqil İxtisas Proqramı Yarat' : '+ Create New Custom Specialty Program'}</option>
-                      {unclaimedOfficialPrograms.map(p => (
-                        <option key={p.id} value={p.id}>{p.id} ({p.totalCredits || 240} ECTS) — {p.name}</option>
-                      ))}
-                    </select>
+                      placeholder={language === 'AZ' ? 'Rəsmi İxtisas Seçimi' : 'Official Specialty Selection'}
+                      searchPlaceholder={language === 'AZ' ? 'Axtar...' : 'Search...'}
+                    />
                   </div>
 
                   <div className="md:col-span-4">
@@ -1633,18 +1639,20 @@ export default function ProgramHeadPanel({
                           <label className="block text-[10px] font-bold text-emerald-950 uppercase tracking-wider">{language === 'AZ' ? 'AİD OLDUĞU İXTİSAS PROQRAMINI SEÇİN *' : 'SELECT THE CORRESPONDING SPECIALTY PROGRAM *'}</label>
                           <span className="text-[10px] text-slate-400">{language === 'AZ' ? 'Word faylındakı fənnin daxil ediləcəyi tədris planı' : 'The curriculum plan into which the subject from the Word file will be entered'}</span>
                         </div>
-                        <select
+                        <SearchableSelect
+                          options={myAllowedPrograms.map(p => ({
+                            value: p.id,
+                            label: `${p.id} (${p.totalCredits || 240} ECTS) — ${p.name}`
+                          }))}
                           value={targetProgramIdForSyllabus}
-                          onChange={e => {
-                            setTargetProgramIdForSyllabus(e.target.value);
+                          onChange={val => {
+                            setTargetProgramIdForSyllabus(val);
                             setSelectedSyllabusIdForAdd('');
                           }}
-                          className="px-3 py-1.5 bg-white border border-emerald-200 rounded-xl text-xs focus:outline-none font-semibold"
-                        >
-                          {myAllowedPrograms.map(p => (
-                            <option key={p.id} value={p.id}>{p.id} ({p.totalCredits || 240} ECTS) — {p.name}</option>
-                          ))}
-                        </select>
+                          placeholder={language === 'AZ' ? 'Proqram Seçin' : 'Select Program'}
+                          searchPlaceholder={language === 'AZ' ? 'Axtar...' : 'Search...'}
+                          className="min-w-[240px]"
+                        />
                       </div>
 
                       {/* Select which Syllabus placeholder to claim */}
@@ -1653,12 +1661,20 @@ export default function ProgramHeadPanel({
                           <label className="block text-[10px] font-bold text-emerald-950 uppercase tracking-wider">{language === 'AZ' ? 'RƏSMİ FƏNN SEÇİN' : 'SELECT OFFICIAL SUBJECT'}</label>
                           <span className="text-[10px] text-slate-400">{language === 'AZ' ? 'Sənədin birləşdiriləcəyi rəsmi fənn planı (placeholder)' : 'The official subject plan (placeholder) the document will merge into'}</span>
                         </div>
-                        <select
+                        <SearchableSelect
+                          options={[
+                            { value: '', label: language === 'AZ' ? '+ Yeni Müstəqil Fənn Kimi Yarat' : '+ Create As New Custom Subject' },
+                            ...(syllabi || [])
+                              .filter(s => s.programId === (targetProgramIdForSyllabus || myAllowedPrograms[0]?.id || programs[0]?.id) && !s.isUploaded && !s.archived)
+                              .map(s => ({
+                                value: s.id,
+                                label: `${s.code} (${s.credits || 6} ECTS) — ${s.name}`
+                              }))
+                          ]}
                           value={selectedSyllabusIdForAdd}
-                          onChange={e => {
-                            const sId = e.target.value;
-                            setSelectedSyllabusIdForAdd(sId);
-                            const found = (syllabi || []).find(s => s.id === sId);
+                          onChange={val => {
+                            setSelectedSyllabusIdForAdd(val);
+                            const found = (syllabi || []).find(s => s.id === val);
                             if (found && parsedResult) {
                               setParsedResult({
                                 ...parsedResult,
@@ -1667,16 +1683,10 @@ export default function ProgramHeadPanel({
                               });
                             }
                           }}
-                          className="px-3 py-1.5 bg-white border border-emerald-250 rounded-xl text-xs focus:outline-none font-bold"
-                        >
-                          <option value="">{language === 'AZ' ? '+ Yeni Müstəqil Fənn Kimi Yarat' : '+ Create As New Custom Subject'}</option>
-                          {(syllabi || [])
-                            .filter(s => s.programId === (targetProgramIdForSyllabus || myAllowedPrograms[0]?.id || programs[0]?.id) && !s.isUploaded && !s.archived)
-                            .map(s => (
-                              <option key={s.id} value={s.id}>{s.code} ({s.credits || 6} ECTS) — {s.name}</option>
-                            ))
-                          }
-                        </select>
+                          placeholder={language === 'AZ' ? 'Fənn Seçin' : 'Select Subject'}
+                          searchPlaceholder={language === 'AZ' ? 'Axtar...' : 'Search...'}
+                          className="min-w-[240px]"
+                        />
                       </div>
 
                       <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">

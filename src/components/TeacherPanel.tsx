@@ -3,11 +3,12 @@ import { useLanguage } from '../LanguageContext';
 import { Program, Syllabus, SuggestionCase, User, AIAnalysisResponse, ReferenceDocument } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import DocumentReader from './DocumentReader';
+import { SearchableSelect } from './SearchableSelect';
 import { 
-  Plus, BookOpen, Layers, Sparkles, AlertCircle, CheckCircle2, 
-  XCircle, Clock, Wand2, History, Edit, FileText, Check, ChevronRight,
-  Search, ChevronDown, UserCheck, Trash2, Database, FileUp
-} from 'lucide-react';
+   Plus, BookOpen, Layers, Sparkles, AlertCircle, CheckCircle2, 
+   XCircle, Clock, Wand2, History, Edit, FileText, Check, ChevronRight,
+   Search, ChevronDown, UserCheck, Trash2, Database, FileUp
+ } from 'lucide-react';
 
 interface TeacherPanelProps {
   currentUser: User;
@@ -833,17 +834,19 @@ export default function TeacherPanel({
                           <label className="block text-[10px] font-bold text-teal-950 uppercase tracking-wider">{language === 'AZ' ? 'AİD OLDUĞU İXTİSAS PROQRAMINI SEÇİN *' : 'SELECT THE CORRESPONDING SPECIALTY PROGRAM *'}</label>
                           <span className="text-[10px] text-slate-400">{language === 'AZ' ? 'Sillabusun daxil ediləcəyi tədris planı' : 'The curriculum plan into which the subject will be entered'}</span>
                         </div>
-                        <select
-                          value={targetProgramIdForSyllabus}
-                          onChange={e => setTargetProgramIdForSyllabus(e.target.value)}
-                          className="px-3 py-1.5 bg-white border border-teal-200 rounded-xl text-xs focus:outline-none font-semibold"
-                        >
-                          {programs
+                        <SearchableSelect
+                          options={programs
                             .filter(p => !p.archived)
-                            .map(p => (
-                              <option key={p.id} value={p.id}>{p.id} ({p.totalCredits || 240} ECTS) — {p.name}</option>
-                            ))}
-                        </select>
+                            .map(p => ({
+                              value: p.id,
+                              label: `${p.id} (${p.totalCredits || 240} ECTS) — ${p.name}`
+                            }))}
+                          value={targetProgramIdForSyllabus}
+                          onChange={val => setTargetProgramIdForSyllabus(val)}
+                          placeholder={language === 'AZ' ? 'Proqram Seçin' : 'Select Program'}
+                          searchPlaceholder={language === 'AZ' ? 'Axtar...' : 'Search...'}
+                          className="min-w-[240px]"
+                        />
                       </div>
 
                       <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
@@ -874,29 +877,38 @@ export default function TeacherPanel({
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                      <div>
                       <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'AİD OLDUĞU PROQRAM' : 'CORRESPONDING PROGRAM'}</label>
-                      <select
+                      <SearchableSelect
+                        options={programs
+                          .filter(p => !p.archived)
+                          .map(p => ({
+                            value: p.id,
+                            label: `${p.id} (${p.totalCredits || 240} ECTS) — ${p.name}`
+                          }))}
                         value={syllProgramId}
-                        onChange={e => {
-                          setSyllProgramId(e.target.value);
+                        onChange={val => {
+                          setSyllProgramId(val);
                           setSelectedSyllabusIdForAdd('');
                         }}
-                        className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                      >
-                        {programs
-                          .filter(p => !p.archived)
-                          .map(p => (
-                            <option key={p.id} value={p.id}>{p.id} ({p.totalCredits || 240} ECTS) — {p.name}</option>
-                          ))}
-                      </select>
+                        placeholder={language === 'AZ' ? 'Proqram Seçin' : 'Select Program'}
+                        searchPlaceholder={language === 'AZ' ? 'Axtar...' : 'Search...'}
+                      />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNN SEÇİN *' : 'SELECT SUBJECT *'}</label>
-                      <select
+                      <SearchableSelect
+                        options={[
+                          { value: '', label: language === 'AZ' ? '-- Fənn Seçin --' : '-- Select Subject --' },
+                          ...syllabi
+                            .filter(s => s.programId === syllProgramId && !s.archived)
+                            .map(s => ({
+                              value: s.id,
+                              label: `${s.code} (${s.credits || 6} ECTS) — ${s.name}`
+                            }))
+                        ]}
                         value={selectedSyllabusIdForAdd}
-                        onChange={e => {
-                          const sId = e.target.value;
-                          setSelectedSyllabusIdForAdd(sId);
-                          const found = (syllabi || []).find(s => s.id === sId);
+                        onChange={val => {
+                          setSelectedSyllabusIdForAdd(val);
+                          const found = (syllabi || []).find(s => s.id === val);
                           if (found) {
                             setSyllCode(found.code);
                             setSyllName(found.name);
@@ -906,17 +918,10 @@ export default function TeacherPanel({
                             setSyllName('');
                           }
                         }}
-                        className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-bold"
+                        placeholder={language === 'AZ' ? 'Fənn Seçin' : 'Select Subject'}
+                        searchPlaceholder={language === 'AZ' ? 'Axtar...' : 'Search...'}
                         required
-                      >
-                        <option value="">{language === 'AZ' ? '-- Fənn Seçin --' : '-- Select Subject --'}</option>
-                        {(syllabi || [])
-                          .filter(s => s.programId === syllProgramId && !s.archived)
-                          .map(s => (
-                            <option key={s.id} value={s.id}>{s.code} ({s.credits || 6} ECTS) — {s.name}</option>
-                          ))
-                        }
-                      </select>
+                      />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNN KODU (OXUNMA)' : 'COURSE CODE (READONLY)'}</label>
