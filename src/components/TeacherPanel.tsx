@@ -145,7 +145,7 @@ export default function TeacherPanel({
     suggestedCode?: string;
   } | null>(null);
   const [parsedDocName, setParsedDocName] = useState('');
-  const [targetProgramIdForSyllabus, setTargetProgramIdForSyllabus] = useState(myPrograms[0]?.id || '');
+  const [targetProgramIdForSyllabus, setTargetProgramIdForSyllabus] = useState(programs[0]?.id || '');
 
   // Filter reference documents so teacher only sees ones associated with their own programs/syllabi or general ones
   const teacherRefDocs = (referenceDocs || []).filter(doc => {
@@ -838,7 +838,7 @@ export default function TeacherPanel({
                           onChange={e => setTargetProgramIdForSyllabus(e.target.value)}
                           className="px-3 py-1.5 bg-white border border-teal-200 rounded-xl text-xs focus:outline-none font-semibold"
                         >
-                          {myPrograms.map(p => (
+                          {programs.filter(p => !p.archived).map(p => (
                             <option key={p.id} value={p.id}>{p.name}</option>
                           ))}
                         </select>
@@ -877,7 +877,7 @@ export default function TeacherPanel({
                         onChange={e => setSyllProgramId(e.target.value)}
                         className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/20"
                       >
-                        {myPrograms.map(p => (
+                        {programs.filter(p => !p.archived).map(p => (
                           <option key={p.id} value={p.id}>{p.name}</option>
                         ))}
                       </select>

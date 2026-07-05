@@ -53,10 +53,12 @@ export default function ProgramHeadPanel({
   const { language, t } = useLanguage();
 
   const myAllowedPrograms = (programs || []).filter(p => {
-    if (!p.createdBy) return true; // pre-existing programs are open
+    // If the program has no assigned heads and no creator, it's open to all heads (e.g. Excel import)
+    if ((!p.allowedHeads || p.allowedHeads.length === 0) && !p.createdBy) return true;
+    
     const curEmail = currentUser?.email?.toLowerCase().trim();
     if (!curEmail) return false;
-    const isCreator = p.createdBy.toLowerCase().trim() === curEmail;
+    const isCreator = p.createdBy && p.createdBy.toLowerCase().trim() === curEmail;
     const isAllowed = p.allowedHeads ? p.allowedHeads.some(email => email.toLowerCase().trim() === curEmail) : false;
     return isCreator || isAllowed;
   });
