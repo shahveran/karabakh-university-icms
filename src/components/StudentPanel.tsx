@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Program, Syllabus, SuggestionCase, User } from '../types';
 import { useLanguage } from '../LanguageContext';
 import { motion } from 'motion/react';
-import { Send, FileText, CheckCircle2, Clock, XCircle, AlertCircle, Sparkles, MapPin, Layers } from 'lucide-react';
+import { Send, FileText, CheckCircle2, Clock, XCircle, AlertCircle, Sparkles, MapPin, Layers, ChevronRight } from 'lucide-react';
 
 interface StudentPanelProps {
   currentUser: User;
@@ -21,16 +21,72 @@ export default function StudentPanel({
 }: StudentPanelProps) {
   const { language, t } = useLanguage();
   const [title, setTitle] = useState('');
+
+  // Progress tracker: determines which stages are completed for a case
+  const CaseProgressTracker = ({ item }: { item: SuggestionCase }) => {
+    const isRejected = item.status === 'Rədd edildi';
+    const isTerminal = item.status === 'Tətbiq olundu' || item.status === 'Qəbul edildi' || isRejected;
+
+    // Determine completed stage index (0-indexed)
+    let activeStage = 0; // Always at least "Sent"
+    if (item.status !== 'Gözləmədə') activeStage = 1; // Head viewed / Under review
+    if (item.assignedTeacherEmail) activeStage = 2;     // Forwarded to teacher
+    if (item.teacherFeedbackStatus && item.teacherFeedbackStatus !== 'none') activeStage = 3; // Teacher wrote feedback
+    if (isTerminal) activeStage = 4;                    // Final decision
+
+    const azStages = ['Göndərildi', 'Rəhbər baxdı', 'Müəllimə', 'Rəy yazıldı', 'Nəticə'];
+    const enStages = ['Sent', 'Reviewed', 'To Teacher', 'Feedback', 'Decision'];
+    const stages = language === 'AZ' ? azStages : enStages;
+
+    return (
+      <div className="mt-2 pt-3 border-t border-slate-100">
+        <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-2">
+          {language === 'AZ' ? 'Mərhələ' : 'Progress'}
+        </p>
+        <div className="flex items-center gap-0.5">
+          {stages.map((stage, idx) => {
+            const done = idx <= activeStage;
+            const isLast = idx === stages.length - 1;
+            const lastColor = isRejected
+              ? 'bg-red-500 text-white border-red-500'
+              : 'bg-emerald-600 text-white border-emerald-600';
+            return (
+              <React.Fragment key={idx}>
+                <div className="flex flex-col items-center gap-0.5" style={{ minWidth: 0, flex: 1 }}>
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-[9px] font-bold transition-all ${
+                    done
+                      ? (isLast ? lastColor : 'bg-emerald-600 text-white border-emerald-600')
+                      : 'bg-white text-slate-300 border-slate-200'
+                  }`}>
+                    {done ? (isLast && isRejected ? '×' : '✓') : idx + 1}
+                  </div>
+                  <span className={`text-[9px] text-center leading-tight font-medium ${
+                    done ? (isLast && isRejected ? 'text-red-600' : 'text-emerald-700') : 'text-slate-400'
+                  }`} style={{ maxWidth: 44 }}>{stage}</span>
+                </div>
+                {!isLast && (
+                  <div className={`h-0.5 flex-1 mt-[-10px] rounded ${
+                    idx < activeStage ? 'bg-emerald-500' : 'bg-slate-200'
+                  }`} />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  const activePrograms = programs.filter(p => !p.archived);
   const [type, setType] = useState('Tədris proqramındakı boşluq');
-  const [selectedProgramId, setSelectedProgramId] = useState(programs[0]?.id || '');
+  const [selectedProgramId, setSelectedProgramId] = useState(activePrograms[0]?.id || '');
   const [selectedSyllabusId, setSelectedSyllabusId] = useState('');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Filter syllabi based on selected program
-  const filteredSyllabi = syllabi.filter(s => s.programId === selectedProgramId);
+  // Filter syllabi based on selected program and ensure it's not archived
+  const filteredSyllabi = syllabi.filter(s => s.programId === selectedProgramId && !s.archived);
 
   // Filter suggestions submitted by this student
   const studentSuggestions = suggestions.filter(
@@ -199,7 +255,7 @@ export default function StudentPanel({
                   }}
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-xs transition-all bg-white text-slate-700 font-semibold cursor-pointer"
                 >
-                  {programs.map(prog => (
+                  {activePrograms.map(prog => (
                     <option key={prog.id} value={prog.id}>
                       {prog.name.length > 25 ? `${prog.name.slice(0, 25)}...` : prog.name}
                     </option>
@@ -379,6 +435,9 @@ export default function StudentPanel({
                         )}
                       </div>
                     )}
+
+                    {/* Progress tracker */}
+                    <CaseProgressTracker item={item} />
                   </motion.div>
                 );
               })}

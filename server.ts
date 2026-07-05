@@ -8,6 +8,7 @@ import { DatabaseState, User, Program, Syllabus, SuggestionCase, Notification } 
 import mammoth from 'mammoth';
 import { setGlobalDispatcher, Agent } from 'undici';
 import crypto from 'crypto';
+import { Storage } from '@google-cloud/storage';
 
 dotenv.config();
 
@@ -19,16 +20,68 @@ setGlobalDispatcher(new Agent({
 }));
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const DB_PATH = path.join(process.cwd(), 'db_store.json');
 
+// --- GCS PERSISTENCE ---
+// In production (Cloud Run), db_store.json is stored in GCS to survive restarts.
+// In development, the local disk file is used as before.
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME || 'ai-studio-bucket-588617478443-europe-west2';
+const GCS_DB_FILE = 'karabakh-icms/db_store.json';
+
+let gcsStorage: Storage | null = null;
+function getGcsStorage(): Storage {
+  if (!gcsStorage) {
+    gcsStorage = new Storage();
+  }
+  return gcsStorage;
+}
+
+async function loadDbFromGcs(): Promise<DatabaseState | null> {
+  try {
+    const storage = getGcsStorage();
+    const bucket = storage.bucket(GCS_BUCKET_NAME);
+    const file = bucket.file(GCS_DB_FILE);
+    const [exists] = await file.exists();
+    if (!exists) return null;
+    const [contents] = await file.download();
+    return JSON.parse(contents.toString('utf-8')) as DatabaseState;
+  } catch (err) {
+    console.error('[GCS] Failed to load db from GCS:', err);
+    return null;
+  }
+}
+
+async function saveDbToGcs(state: DatabaseState): Promise<void> {
+  try {
+    const storage = getGcsStorage();
+    const bucket = storage.bucket(GCS_BUCKET_NAME);
+    const file = bucket.file(GCS_DB_FILE);
+    await file.save(JSON.stringify(state, null, 2), {
+      contentType: 'application/json',
+      resumable: false
+    });
+  } catch (err) {
+    console.error('[GCS] Failed to save db to GCS:', err);
+  }
+}
+
 // Helper to initialize database with seed data
 function getInitialState(): DatabaseState {
   const users: User[] = [
+    {
+      email: 'munsif@qu.edu.az',
+      name: 'QS Reimagine Münsif',
+      role: 'observer',
+      details: 'QS Reimagine Monitorinq və Qiymətləndirmə',
+      password: '123456',
+      approved: true
+    },
     {
       email: 'admin@qu.edu.az',
       name: 'Sistem Administratoru',
@@ -200,27 +253,9 @@ function getInitialState(): DatabaseState {
 let dbInstance: DatabaseState | null = null;
 
 // Read/Write DB State
-function loadDb(): DatabaseState {
-  if (dbInstance) {
-    return dbInstance;
-  }
-
-  let db: DatabaseState;
-  if (!fs.existsSync(DB_PATH)) {
-    db = getInitialState();
-    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf-8');
-    dbInstance = db;
-    return db;
-  }
-  try {
-    const raw = fs.readFileSync(DB_PATH, 'utf-8');
-    db = JSON.parse(raw);
-  } catch (err) {
-    console.error('Failed to parse database file. Initializing fresh.', err);
-    db = getInitialState();
-  }
-
-  // Auto-migration & validation:
+// In production: reads from GCS on first call, then caches in memory.
+// In development: reads from local disk.
+function migrateDb(db: DatabaseState): { db: DatabaseState; migrated: boolean } {
   let migrated = false;
 
   if (!db.referenceDocs) {
@@ -238,6 +273,21 @@ function loadDb(): DatabaseState {
       role: 'admin',
       details: 'Sistem idarəçiliyi və təsdiqlər',
       password: hashPassword('admin123'),
+      approved: true
+    });
+    migrated = true;
+  }
+
+  // Ensure observer user exists
+  const hasObserver = db.users && db.users.some(u => u.role === 'observer' || u.email.toLowerCase() === 'munsif@qu.edu.az');
+  if (!hasObserver) {
+    if (!db.users) db.users = [];
+    db.users.push({
+      email: 'munsif@qu.edu.az',
+      name: 'QS Reimagine Münsif',
+      role: 'observer',
+      details: 'QS Reimagine Monitorinq və Qiymətləndirmə',
+      password: hashPassword('123456'),
       approved: true
     });
     migrated = true;
@@ -281,22 +331,62 @@ function loadDb(): DatabaseState {
     });
   }
 
-  dbInstance = db;
+  return { db, migrated };
+}
 
-  if (migrated) {
-    saveDb(db);
+function loadDb(): DatabaseState {
+  if (dbInstance) {
+    return dbInstance;
   }
 
-  return db;
+  // In production on Cloud Run, GCS pre-loading happens in startServer().
+  // If dbInstance is null here, it means GCS load hasn't happened yet — use initial state.
+  if (IS_PRODUCTION) {
+    console.warn('[GCS] loadDb() called before GCS pre-load completed. Using initial state.');
+    const db = getInitialState();
+    dbInstance = db;
+    return db;
+  }
+
+  let db: DatabaseState;
+  if (!fs.existsSync(DB_PATH)) {
+    db = getInitialState();
+    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf-8');
+    dbInstance = db;
+    return db;
+  }
+  try {
+    const raw = fs.readFileSync(DB_PATH, 'utf-8');
+    db = JSON.parse(raw);
+  } catch (err) {
+    console.error('Failed to parse database file. Initializing fresh.', err);
+    db = getInitialState();
+  }
+
+  const result = migrateDb(db);
+  dbInstance = result.db;
+
+  if (result.migrated) {
+    saveDb(result.db);
+  }
+
+  return result.db;
 }
 
 function saveDb(state: DatabaseState) {
   dbInstance = state;
-  // Write to disk asynchronously in the background so we do NOT block the event loop!
-  fs.promises.writeFile(DB_PATH, JSON.stringify(state, null, 2), 'utf-8')
-    .catch(err => {
-      console.error('Asynchronous saveDb failed:', err);
+  if (IS_PRODUCTION) {
+    // In production: write to GCS asynchronously
+    saveDbToGcs(state).catch(err => {
+      console.error('[GCS] Asynchronous saveDbToGcs failed:', err);
     });
+  } else {
+    // In development: write to local disk asynchronously
+    fs.promises.writeFile(DB_PATH, JSON.stringify(state, null, 2), 'utf-8')
+      .catch(err => {
+        console.error('Asynchronous saveDb (disk) failed:', err);
+      });
+  }
 }
 
 function sanitizeUser(user: User): Omit<User, 'password'> {
@@ -308,6 +398,16 @@ function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
   return `${salt}:${hash}`;
+}
+
+function hashPasswordAsync(password: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const salt = crypto.randomBytes(16).toString('hex');
+    crypto.pbkdf2(password, salt, 100000, 64, 'sha512', (err, derivedKey) => {
+      if (err) return reject(err);
+      resolve(`${salt}:${derivedKey.toString('hex')}`);
+    });
+  });
 }
 
 function verifyPassword(password: string, storedHash: string): boolean {
@@ -593,7 +693,7 @@ app.post('/api/admin/users', authenticate, authorize(['admin']), (req, res) => {
 });
 
 // POST Batch Create Users (Admin Panel)
-app.post('/api/admin/users/batch', authenticate, authorize(['admin']), (req, res) => {
+app.post('/api/admin/users/batch', authenticate, authorize(['admin']), async (req, res) => {
   const { users: batchUsers } = req.body;
   if (!batchUsers || !Array.isArray(batchUsers)) {
     return res.status(400).json({ error: 'İstifadəçi siyahısı göndərilməyib və ya formatı düzgün deyil.' });
@@ -606,10 +706,20 @@ app.post('/api/admin/users/batch', authenticate, authorize(['admin']), (req, res
     errors: [] as string[]
   };
 
-  batchUsers.forEach((u: any, index: number) => {
+  // Pre-calculate default password hash once asynchronously
+  // This avoids recalculating pbkdf2 100,000 times for every single student (takes 0.08s per student)
+  let defaultHashedPw = '';
+  try {
+    defaultHashedPw = await hashPasswordAsync('123456');
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Sistem xətası: Şifrə hash-i generasiya oluna bilmədi.' });
+  }
+
+  for (let index = 0; index < batchUsers.length; index++) {
+    const u = batchUsers[index];
     const email = u.email ? String(u.email).trim() : '';
     const name = u.name ? String(u.name).trim() : '';
-    const password = u.password ? String(u.password).trim() : '123456';
+    const passwordRaw = u.password ? String(u.password).trim() : '123456';
     let role = u.role ? String(u.role).trim().toLowerCase() : 'student';
     const details = u.details ? String(u.details).trim() : '';
     const approved = u.approved !== undefined ? !!u.approved : true;
@@ -628,28 +738,40 @@ app.post('/api/admin/users/batch', authenticate, authorize(['admin']), (req, res
     if (!email || !name) {
       results.skipped++;
       results.errors.push(`Sətir ${index + 1}: Email və ya Ad boş ola bilməz.`);
-      return;
+      continue;
     }
 
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailPattern.test(email)) {
       results.skipped++;
       results.errors.push(`Sətir ${index + 1} (${name}): Keçərsiz email formatı "${email}".`);
-      return;
+      continue;
     }
 
     const validRoles = ['admin', 'head', 'student', 'enterprise', 'teacher'];
     if (!validRoles.includes(role)) {
       results.skipped++;
       results.errors.push(`Sətir ${index + 1} (${email}): Keçərsiz rol "${role}". Rol bunlardan biri olmalıdır: student (tələbə), enterprise (müəssisə), head (proqram rəhbəri), teacher (müəllim), admin (administrator).`);
-      return;
+      continue;
     }
 
     const exists = db.users.some(existing => existing.email.toLowerCase() === email.toLowerCase());
     if (exists) {
       results.skipped++;
       results.errors.push(`Sətir ${index + 1} (${email}): Bu email ilə artıq istifadəçi var.`);
-      return;
+      continue;
+    }
+
+    // Use pre-calculated hash for default '123456' password, calculate only for custom passwords
+    let hashedPasswordToUse = defaultHashedPw;
+    if (passwordRaw !== '123456') {
+      try {
+        hashedPasswordToUse = await hashPasswordAsync(passwordRaw);
+      } catch (err: any) {
+        results.skipped++;
+        results.errors.push(`Sətir ${index + 1} (${email}): Şifrə hashlənərkən xəta yarandı.`);
+        continue;
+      }
     }
 
     const newUser: User = {
@@ -657,19 +779,212 @@ app.post('/api/admin/users/batch', authenticate, authorize(['admin']), (req, res
       name,
       role: role as any,
       details,
-      password: hashPassword(password),
+      password: hashedPasswordToUse,
       approved
     };
 
     db.users.push(newUser);
     results.added++;
-  });
+  }
 
   if (results.added > 0) {
     saveDb(db);
   }
 
   res.json(results);
+});
+
+// POST Bulk Action on Users (Admin Panel)
+app.post('/api/admin/users/bulk-action', authenticate, authorize(['admin']), async (req, res) => {
+  const { emails, action, payload } = req.body;
+  if (!emails || !Array.isArray(emails) || emails.length === 0) {
+    return res.status(400).json({ error: 'İstifadəçilər seçilməyib.' });
+  }
+
+  const db = loadDb();
+  let affected = 0;
+
+  if (action === 'delete') {
+    db.users = db.users.filter(u => {
+      // Prevent deleting the currently logged-in admin or the seed super-admin
+      const currentUserEmail = ((req as any).user)?.email || '';
+      if (u.email.toLowerCase() === currentUserEmail.toLowerCase() || u.email.toLowerCase() === 'admin@qu.edu.az') {
+        return true;
+      }
+      const match = emails.some(e => e.toLowerCase() === u.email.toLowerCase());
+      if (match) affected++;
+      return !match;
+    });
+  } else if (action === 'reset-password') {
+    const { password } = payload || {};
+    if (!password || String(password).trim() === '') {
+      return res.status(400).json({ error: 'Şifrə təyin edilməyib.' });
+    }
+    const hashed = await hashPasswordAsync(password);
+    db.users = db.users.map(u => {
+      const match = emails.some(e => e.toLowerCase() === u.email.toLowerCase());
+      if (match) {
+        u.password = hashed;
+        affected++;
+      }
+      return u;
+    });
+  } else if (action === 'update-role') {
+    const { role } = payload || {};
+    const validRoles = ['admin', 'head', 'student', 'enterprise', 'teacher'];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ error: 'Keçərsiz rol.' });
+    }
+    db.users = db.users.map(u => {
+      // Prevent changing the admin role of seed super-admin or current user
+      const currentUserEmail = ((req as any).user)?.email || '';
+      if (u.email.toLowerCase() === currentUserEmail.toLowerCase() || u.email.toLowerCase() === 'admin@qu.edu.az') {
+        return u;
+      }
+      const match = emails.some(e => e.toLowerCase() === u.email.toLowerCase());
+      if (match) {
+        u.role = role;
+        affected++;
+      }
+      return u;
+    });
+  } else if (action === 'update-status') {
+    const { approved } = payload || {};
+    db.users = db.users.map(u => {
+      // Prevent disabling seed super-admin or current user
+      const currentUserEmail = ((req as any).user)?.email || '';
+      if (u.email.toLowerCase() === currentUserEmail.toLowerCase() || u.email.toLowerCase() === 'admin@qu.edu.az') {
+        return u;
+      }
+      const match = emails.some(e => e.toLowerCase() === u.email.toLowerCase());
+      if (match) {
+        u.approved = !!approved;
+        affected++;
+      }
+      return u;
+    });
+  } else {
+    return res.status(400).json({ error: 'Keçərsiz əməliyyat.' });
+  }
+
+  if (affected > 0) {
+    saveDb(db);
+  }
+
+  res.json({ success: true, affected });
+});
+
+// POST Import Curriculum (Programs and Syllabi) from XLS/CSV parsed list (Upsert by official code ID)
+app.post('/api/admin/curriculum/import', authenticate, authorize(['admin']), (req, res) => {
+  const { items } = req.body; // Array of { programCode, programName, syllabusCode, syllabusName, credits, description }
+  if (!items || !Array.isArray(items)) {
+    return res.status(400).json({ error: 'Toplu daxiletmə siyahısı düzgün deyil.' });
+  }
+
+  const db = loadDb();
+  let programsAdded = 0;
+  let programsUpdated = 0;
+  let syllabiAdded = 0;
+  let syllabiUpdated = 0;
+
+  // Track codes that are present in this import batch
+  const importedProgramCodes = new Set<string>();
+  const importedSyllabusCodes = new Set<string>();
+
+  items.forEach((item: any) => {
+    const progCode = item.programCode ? String(item.programCode).trim().toUpperCase() : '';
+    const progName = item.programName ? String(item.programName).trim() : '';
+    const syllCode = item.syllabusCode ? String(item.syllabusCode).trim().toUpperCase() : '';
+    const syllName = item.syllabusName ? String(item.syllabusName).trim() : '';
+    const credits = item.credits ? parseInt(String(item.credits), 10) : 6;
+    const description = item.description ? String(item.description).trim() : '';
+
+    if (!progCode || !progName) return; // skip rows without program details
+
+    importedProgramCodes.add(progCode);
+
+    // 1. Upsert Program
+    let program = db.programs.find(p => p.id.toUpperCase() === progCode);
+    if (!program) {
+      program = {
+        id: progCode,
+        name: progName,
+        description: `XLS İdxal ilə yaradılıb.`,
+        version: 'v1.0',
+        lastUpdated: new Date().toISOString().split('T')[0],
+        status: 'Güncəl',
+        updatesLog: ['Toplu idxal ilə yaradıldı.'],
+        totalCredits: 240,
+        archived: false
+      };
+      db.programs.push(program);
+      programsAdded++;
+    } else {
+      // Overwrite/Update details
+      program.name = progName;
+      program.archived = false; // reactivate if it was archived
+      program.lastUpdated = new Date().toISOString().split('T')[0];
+      programsUpdated++;
+    }
+
+    // 2. Upsert Syllabus if syllabus details exist in this row
+    if (syllCode && syllName) {
+      importedSyllabusCodes.add(syllCode);
+      let syllabus = db.syllabi.find(s => s.id.toUpperCase() === syllCode);
+      if (!syllabus) {
+        syllabus = {
+          id: syllCode,
+          programId: progCode,
+          code: syllCode,
+          name: syllName,
+          content: description || 'Sillabus daxili mövzuları müəllim tərəfindən daxil ediləcək.',
+          lastUpdated: new Date().toISOString().split('T')[0],
+          updatesLog: ['Toplu idxal ilə yaradıldı.'],
+          credits: isNaN(credits) ? 6 : credits,
+          archived: false
+        };
+        db.syllabi.push(syllabus);
+        syllabiAdded++;
+      } else {
+        // Update details
+        syllabus.name = syllName;
+        syllabus.programId = progCode;
+        syllabus.credits = isNaN(credits) ? syllabus.credits : credits;
+        syllabus.archived = false; // reactivate if it was archived
+        syllabus.lastUpdated = new Date().toISOString().split('T')[0];
+        syllabiUpdated++;
+      }
+    }
+  });
+
+  // Archive any program or syllabus that is NOT present in the imported items
+  // (Only if we imported at least one item, to avoid archiving everything by mistake)
+  if (importedProgramCodes.size > 0) {
+    db.programs = db.programs.map(p => {
+      if (!importedProgramCodes.has(p.id.toUpperCase())) {
+        p.archived = true;
+      }
+      return p;
+    });
+  }
+  if (importedSyllabusCodes.size > 0) {
+    db.syllabi = db.syllabi.map(s => {
+      if (!importedSyllabusCodes.has(s.id.toUpperCase())) {
+        s.archived = true;
+      }
+      return s;
+    });
+  }
+
+  saveDb(db);
+
+  res.json({
+    success: true,
+    programsAdded,
+    programsUpdated,
+    syllabiAdded,
+    syllabiUpdated
+  });
 });
 
 // PUT Update User (Admin Panel)
@@ -728,6 +1043,30 @@ app.delete('/api/admin/users/:email', authenticate, authorize(['admin']), (req, 
   }
 
   db.users.splice(userIdx, 1);
+
+  // Cascade cleanup:
+  // 1. Delete user notifications
+  db.notifications = db.notifications.filter(n => n.userEmail.toLowerCase() !== email.toLowerCase());
+
+  // 2. Clear from syllabus teacher fields
+  db.syllabi = db.syllabi.map(s => {
+    if (s.teacherEmail && s.teacherEmail.toLowerCase() === email.toLowerCase()) {
+      s.teacherEmail = undefined;
+    }
+    if (s.teacherEmails) {
+      s.teacherEmails = s.teacherEmails.filter(e => e.toLowerCase() !== email.toLowerCase());
+    }
+    return s;
+  });
+
+  // 3. Clear assigned teacher from suggestions
+  db.suggestions = db.suggestions.map(sg => {
+    if (sg.assignedTeacherEmail && sg.assignedTeacherEmail.toLowerCase() === email.toLowerCase()) {
+      sg.assignedTeacherEmail = undefined;
+    }
+    return sg;
+  });
+
   saveDb(db);
   res.json({ success: true, message: 'İstifadəçi uğurla silindi.' });
 });
@@ -878,7 +1217,7 @@ app.put('/api/syllabi/:id', authenticate, authorize(['admin', 'head', 'teacher']
   res.json(updatedSyllabus);
 });
 
-// Delete a Program (Cascade delete its syllabi and suggestions)
+// Delete a Program (Soft-delete/Archive program and its syllabi)
 app.delete('/api/programs/:id', authenticate, authorize(['admin', 'head']), (req, res) => {
   const { id } = req.params;
   const db = loadDb();
@@ -888,12 +1227,30 @@ app.delete('/api/programs/:id', authenticate, authorize(['admin', 'head']), (req
     return res.status(404).json({ error: 'Tədris proqramı tapılmadı.' });
   }
 
-  db.programs.splice(programIndex, 1);
-  db.syllabi = db.syllabi.filter(s => s.programId !== id);
-  db.suggestions = db.suggestions.filter(sc => sc.programId !== id);
+  // Soft-Delete: set archived flag on program and its syllabi
+  db.programs[programIndex].archived = true;
+  db.programs[programIndex].status = 'Arxivləşdirilib';
+  db.programs[programIndex].lastUpdated = new Date().toISOString().split('T')[0];
+  db.programs[programIndex].updatesLog.unshift(`${new Date().toISOString().split('T')[0]}: Proqram arxivləşdirildi.`);
+
+  db.syllabi = db.syllabi.map(s => {
+    if (s.programId === id) {
+      s.archived = true;
+    }
+    return s;
+  });
+
+  // Safe re-association: nullify programId for affected suggestions instead of hard deleting
+  db.suggestions = db.suggestions.map(sc => {
+    if (sc.programId === id) {
+      sc.programId = '';
+      sc.syllabusId = undefined;
+    }
+    return sc;
+  });
 
   saveDb(db);
-  res.json({ success: true, message: 'Tədris proqramı silindi.' });
+  res.json({ success: true, message: 'Tədris proqramı arxivləşdirildi.' });
 });
 
 // Delete a Syllabus
@@ -908,27 +1265,35 @@ app.delete('/api/syllabi/:id', authenticate, authorize(['admin', 'head', 'teache
 
   const deletedSyllabus = db.syllabi[syllabusIndex];
 
-  if (req.user!.role === 'teacher') {
-    const isPrimaryTeacher = deletedSyllabus.teacherEmail && deletedSyllabus.teacherEmail.toLowerCase().trim() === req.user!.email.toLowerCase().trim();
-    const isCoTeacher = deletedSyllabus.teacherEmails && deletedSyllabus.teacherEmails.some(email => email.toLowerCase().trim() === req.user!.email.toLowerCase().trim());
+  if (((req as any).user).role === 'teacher') {
+    const isPrimaryTeacher = deletedSyllabus.teacherEmail && deletedSyllabus.teacherEmail.toLowerCase().trim() === ((req as any).user).email.toLowerCase().trim();
+    const isCoTeacher = deletedSyllabus.teacherEmails && deletedSyllabus.teacherEmails.some(email => email.toLowerCase().trim() === ((req as any).user).email.toLowerCase().trim());
     if (!isPrimaryTeacher && !isCoTeacher) {
       return res.status(403).json({ error: 'Bu sillabusu silməyə icazəniz yoxdur.' });
     }
   }
 
-  db.syllabi.splice(syllabusIndex, 1);
+  // Soft-Delete: set archived flag on syllabus
+  db.syllabi[syllabusIndex].archived = true;
+  db.syllabi[syllabusIndex].lastUpdated = new Date().toISOString().split('T')[0];
 
   const progIndex = db.programs.findIndex(p => p.id === deletedSyllabus.programId);
   if (progIndex !== -1) {
     db.programs[progIndex].status = 'Yenilənib';
     db.programs[progIndex].lastUpdated = new Date().toISOString().split('T')[0];
-    db.programs[progIndex].updatesLog.unshift(`${new Date().toISOString().split('T')[0]}: "${deletedSyllabus.name}" sillabusu silindi.`);
+    db.programs[progIndex].updatesLog.unshift(`${new Date().toISOString().split('T')[0]}: "${deletedSyllabus.name}" sillabusu arxivləşdirildi.`);
   }
 
-  db.suggestions = db.suggestions.filter(sc => sc.syllabusId !== id);
+  // Safe re-association: nullify syllabusId for suggestions instead of hard deleting
+  db.suggestions = db.suggestions.map(sc => {
+    if (sc.syllabusId === id) {
+      sc.syllabusId = undefined;
+    }
+    return sc;
+  });
 
   saveDb(db);
-  res.json({ success: true, message: 'Sillabus silindi.' });
+  res.json({ success: true, message: 'Sillabus arxivləşdirildi.' });
 });
 
 // Submit a Suggestion Case
@@ -1275,8 +1640,43 @@ app.post('/api/ai/analyze', authenticate, authorize(['admin', 'head', 'teacher']
       return res.status(400).json({ error: 'Seçilmiş təkliflər tapılmadı.' });
     }
 
-    // Get reference documents (if any)
-    const referenceDocs = db.referenceDocs || [];
+    // --- AI ANALYSIS CACHE CHECK ---
+    // Build a deterministic cache key from the request parameters
+    const sortedIds = [...suggestionIds].sort().join(',');
+    const cacheKeyRaw = `${programId}|${syllabusId || ''}|${sortedIds}`;
+    const cacheKey = crypto.createHash('sha256').update(cacheKeyRaw).digest('hex');
+
+    if (!db.aiAnalysisCache) db.aiAnalysisCache = [];
+    const now = new Date();
+    const cached = db.aiAnalysisCache.find(c => c.key === cacheKey && new Date(c.expiresAt) > now);
+    if (cached) {
+      console.log(`[AI Cache] HIT for key ${cacheKey.slice(0, 8)}...`);
+      return res.json({ ...cached.result, _cached: true });
+    }
+
+    // Get reference documents — filter by relevance to avoid bloating the prompt
+    // Only send docs that share keywords with the case titles/descriptions (max 3)
+    const allDocs = db.referenceDocs || [];
+    let referenceDocs = allDocs;
+    if (allDocs.length > 3) {
+      const caseText = selectedCases
+        .map(c => `${c.title} ${c.description}`)
+        .join(' ')
+        .toLowerCase();
+      const keywords = caseText
+        .split(/[\s,،.؟!()«»"""]+/)
+        .filter(w => w.length > 4);
+      const scored = allDocs.map(doc => {
+        const docText = `${doc.name} ${doc.content}`.toLowerCase();
+        const score = keywords.filter(kw => docText.includes(kw)).length;
+        return { doc, score };
+      });
+      const relevant = scored.filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 3);
+      // If nothing relevant found, still send up to 3 most recently uploaded
+      referenceDocs = relevant.length > 0
+        ? relevant.map(x => x.doc)
+        : allDocs.slice(-3);
+    }
 
     const ai = getGeminiClient();
     const systemInstruction = `
@@ -1327,7 +1727,7 @@ KEYS #${idx + 1}:
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-2.5-flash',
       contents: userPrompt,
       config: {
         systemInstruction: systemInstruction,
@@ -1375,9 +1775,36 @@ KEYS #${idx + 1}:
                 required: ['docId', 'docName', 'matchedSectionText', 'explanation']
               },
               description: 'Matched elements or sections from the uploaded reference documents where alignment is achieved.'
+            },
+            title: {
+              type: Type.STRING,
+              description: 'Proposed improved/modernized title for the syllabus. If no syllabus is provided, use the program name.'
+            },
+            summary: {
+              type: Type.STRING,
+              description: 'Executive summary of the recommended reform or alignment.'
+            },
+            strategicGoals: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: 'List of strategic targets, skills, or topics proposed for integration.'
+            },
+            newContent: {
+              type: Type.STRING,
+              description: 'The complete new/reformed content of the syllabus integrating the suggested changes. If no syllabus, provide the updated program description.'
             }
           },
-          required: ['evaluation', 'suggestedChanges', 'karabakhContext', 'specificSectionModifications', 'referenceDocMatches']
+          required: [
+            'evaluation', 
+            'suggestedChanges', 
+            'karabakhContext', 
+            'specificSectionModifications', 
+            'referenceDocMatches',
+            'title',
+            'summary',
+            'strategicGoals',
+            'newContent'
+          ]
         }
       }
     });
@@ -1388,6 +1815,17 @@ KEYS #${idx + 1}:
     }
 
     const result = JSON.parse(text);
+
+    // --- AI ANALYSIS CACHE WRITE ---
+    // Save result for 24 hours so identical requests don't hit Gemini again
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const freshCache = (db.aiAnalysisCache || []).filter(c => c.key !== cacheKey); // remove stale entry if any
+    freshCache.push({ key: cacheKey, result, cachedAt: now.toISOString(), expiresAt });
+    // Keep cache size bounded (max 50 entries, evict oldest)
+    db.aiAnalysisCache = freshCache.length > 50 ? freshCache.slice(-50) : freshCache;
+    saveDb(db);
+    console.log(`[AI Cache] MISS → stored result for key ${cacheKey.slice(0, 8)}...`);
+
     res.json(result);
 
   } catch (err: any) {
@@ -1488,7 +1926,7 @@ Cavab yalnız və yalnız yuxarıdakı formalı etibarlı JSON olmalıdır, əla
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-2.5-flash',
       contents: userPrompt,
       config: {
         systemInstruction: systemInstruction,
@@ -1541,6 +1979,29 @@ Cavab yalnız və yalnız yuxarıdakı formalı etibarlı JSON olmalıdır, əla
 // --- VITE MIDDLEWARE AND STATIC SERVING ---
 
 async function startServer() {
+  // Pre-load DB from GCS in production before accepting any HTTP requests
+  if (IS_PRODUCTION) {
+    console.log('[GCS] Pre-loading database from GCS...');
+    const gcsDb = await loadDbFromGcs();
+    if (gcsDb) {
+      // Run the same migration/validation logic
+      const result = migrateDb(gcsDb);
+      dbInstance = result.db;
+      if (result.migrated) {
+        console.log('[GCS] Auto-migrations detected. Saving updated database back to GCS...');
+        await saveDbToGcs(result.db);
+      }
+      console.log('[GCS] Database loaded and migrated successfully.');
+    } else {
+      console.log('[GCS] No GCS database found. Initializing with seed data.');
+      const fresh = getInitialState();
+      const result = migrateDb(fresh);
+      dbInstance = result.db;
+      await saveDbToGcs(result.db);
+      console.log('[GCS] Seed data saved to GCS.');
+    }
+  }
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -1549,8 +2010,15 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    // Hashed assets can be cached forever
+    app.use('/assets', express.static(path.join(distPath, 'assets'), {
+      maxAge: '1y',
+      immutable: true
+    }));
+    app.use(express.static(distPath, { index: false }));
     app.get('*', (req, res) => {
+      // Never cache index.html so browser always gets the latest asset references
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

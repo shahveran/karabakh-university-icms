@@ -5,7 +5,7 @@ import {
   User as UserIcon, Plus, Trash2, Key, Mail, Check, X, Shield, 
   Search, RefreshCw, UserCheck, AlertCircle, Sparkles, Building2, 
   GraduationCap, Info, ChevronDown, Upload, Download, FileSpreadsheet, FileText, ChevronRight,
-  BookOpen, Layers
+  BookOpen, Layers, ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -23,6 +23,26 @@ export default function AdminPanel({ currentUser, onRefreshApp }: AdminPanelProp
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  // Sorting states
+  const [sortField, setSortField] = useState<'name' | 'role' | 'approved' | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  // Bulk actions states
+  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
+  const [bulkAction, setBulkAction] = useState<string>('');
+  const [bulkPassword, setBulkPassword] = useState<string>('');
+  const [bulkRole, setBulkRole] = useState<UserRole>('student');
+  const [bulkStatus, setBulkStatus] = useState<boolean>(true);
+  const [bulkSubmittingAction, setBulkSubmittingAction] = useState<boolean>(false);
+
+  // Curriculum bulk import states
+  const [showCurriculumBulkModal, setShowCurriculumBulkModal] = useState(false);
+  const [bulkCurriculumItems, setBulkCurriculumItems] = useState<any[]>([]);
+  const [bulkCurriculumPasteText, setBulkCurriculumPasteText] = useState('');
+  const [bulkCurriculumFile, setBulkCurriculumFile] = useState<File | null>(null);
+  const [bulkCurriculumErrors, setBulkCurriculumErrors] = useState<string[]>([]);
+  const [bulkCurriculumSubmitting, setBulkCurriculumSubmitting] = useState(false);
 
   // Form states for creating a user
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -70,6 +90,175 @@ export default function AdminPanel({ currentUser, onRefreshApp }: AdminPanelProp
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  const handleBulkActionSubmit = async (e: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!bulkAction || selectedEmails.length === 0) return;
+
+    setBulkSubmittingAction(true);
+    setError('');
+    setSuccess('');
+
+    let payload: any = {};
+    if (bulkAction === 'reset-password') {
+      if (!bulkPassword.trim()) {
+        setError(language === 'AZ' ? 'Zəhmət olmasa yeni şifrəni daxil edin.' : 'Please enter the new password.');
+        setBulkSubmittingAction(false);
+        return;
+      }
+      payload = { password: bulkPassword };
+    } else if (bulkAction === 'update-role') {
+      payload = { role: bulkRole };
+    } else if (bulkAction === 'update-status') {
+      payload = { approved: bulkStatus };
+    }
+
+    try {
+      const res = await fetch('/api/admin/users/bulk-action', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          emails: selectedEmails,
+          action: bulkAction,
+          payload
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Bulk action failed');
+
+      setSuccess(
+        language === 'AZ'
+          ? `${data.affected} istifadəçi üzərində toplu əməliyyat uğurla icra olundu.`
+          : `Successfully performed bulk action on ${data.affected} users.`
+      );
+      setSelectedEmails([]);
+      setBulkAction('');
+      setBulkPassword('');
+      fetchUsers();
+    } catch (err: any) {
+      setError(err.message || 'Error executing bulk action');
+    } finally {
+      setBulkSubmittingAction(false);
+    }
+  };
+
+  const handleSelectUser = (email: string) => {
+    setSelectedEmails(prev =>
+      prev.includes(email)
+        ? prev.filter(e => e !== email)
+        : [...prev, email]
+    );
+  };
+
+  const handleSelectAllVisible = () => {
+    const visibleEmails = sortedUsers.map(u => u.email);
+    const allSelected = visibleEmails.every(email => selectedEmails.includes(email));
+
+    if (allSelected) {
+      setSelectedEmails(prev => prev.filter(email => !visibleEmails.includes(email)));
+    } else {
+      setSelectedEmails(prev => {
+        const union = new Set([...prev, ...visibleEmails]);
+        return Array.from(union);
+      });
+    }
+  };
+
+  const downloadSampleCurriculumCSV = () => {
+    const csvContent = "programCode;programName;syllabusCode;syllabusName;credits;description\n"
+      + "PR-INF;Informatika muellimliyi;INF-101;Informatikanin esaslari;6;Komputer elmleri ve alqoritmlere giris kursu\n"
+      + "PR-INF;Informatika muellimliyi;INF-102;Proqramlasdirma 1;6;C++ ve ya Python dilinde esas proqramlasdirma\n"
+      + "PR-MATH;Riyaziyyat muellimliyi;MTH-101;Riyazi analiz 1;8;Limitler funksiyalar ve inteqrallar\n";
+    
+    const encodedUri = "data:text/csv;charset=utf-8,\uFEFF" + encodeURIComponent(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "tedris_plani_sablon.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleCurriculumFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBulkCurriculumFile(file);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      parseCurriculumCSV(text);
+    };
+    reader.readAsText(file);
+  };
+
+  const parseCurriculumCSV = (text: string) => {
+    const lines = text.split('\n');
+    const parsed: any[] = [];
+    const errors: string[] = [];
+
+    lines.forEach((line, idx) => {
+      if (idx === 0 || !line.trim()) return; // skip header or empty lines
+      
+      // Auto-detect delimiter: check for semicolon first, otherwise use comma
+      const delimiter = line.includes(';') ? ';' : ',';
+      const parts = line.split(delimiter).map(s => s.trim());
+      
+      if (parts.length < 4) {
+        errors.push(language === 'AZ' ? `Satir ${idx + 1}: Sutun sayi 4-den az olmamalidir.` : `Line ${idx + 1}: Must have at least 4 columns.`);
+        return;
+      }
+      const [programCode, programName, syllabusCode, syllabusName, credits, description] = parts;
+      if (!programCode || !programName) {
+        errors.push(language === 'AZ' ? `Satir ${idx + 1}: Proqram kodu ve adi mecburidir.` : `Line ${idx + 1}: Program code and name are required.`);
+        return;
+      }
+      parsed.push({
+        programCode,
+        programName,
+        syllabusCode: syllabusCode || '',
+        syllabusName: syllabusName || '',
+        credits: credits ? parseInt(credits, 10) : 6,
+        description: description || ''
+      });
+    });
+
+    setBulkCurriculumItems(parsed);
+    setBulkCurriculumErrors(errors);
+  };
+
+  const handleCurriculumBulkSubmit = async () => {
+    if (bulkCurriculumItems.length === 0) return;
+    setBulkCurriculumSubmitting(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch('/api/admin/curriculum/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: bulkCurriculumItems })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Import failed');
+
+      setSuccess(
+        language === 'AZ'
+          ? `Tedris Plani ugurla idxal olundu! ${data.programsAdded} proqram elave edildi, ${data.programsUpdated} yenilendi. ${data.syllabiAdded} sillabus elave edildi, ${data.syllabiUpdated} yenilendi.`
+          : `Curriculum imported successfully! Added ${data.programsAdded} programs, updated ${data.programsUpdated}. Added ${data.syllabiAdded} syllabi, updated ${data.syllabiUpdated}.`
+      );
+      setShowCurriculumBulkModal(false);
+      setBulkCurriculumItems([]);
+      setBulkCurriculumFile(null);
+      if (onRefreshApp) {
+        await onRefreshApp();
+      }
+    } catch (err: any) {
+      setError(err.message || 'Import error');
+    } finally {
+      setBulkCurriculumSubmitting(false);
+    }
+  };
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -328,11 +517,10 @@ export default function AdminPanel({ currentUser, onRefreshApp }: AdminPanelProp
       ? "Səbinə Rəsulova,sabina@qu.edu.az,teacher,sabina123,Pedaqogika müəllimi"
       : "Sabina Rasulova,sabina@qu.edu.az,teacher,sabina123,Pedagogy teacher";
     
-    const csvContent = "\uFEFF" + [headers, row1, row2, row3, row4].join("\n");
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+    const csvContent = [headers, row1, row2, row3, row4].join("\n");
+    const encodedUri = "data:text/csv;charset=utf-8,\uFEFF" + encodeURIComponent(csvContent);
     const link = document.createElement("a");
-    link.setAttribute("href", url);
+    link.setAttribute("href", encodedUri);
     link.setAttribute("download", language === 'AZ' ? "qu_toplu_istifadeci_sablonu.csv" : "qu_bulk_user_template.csv");
     document.body.appendChild(link);
     link.click();
@@ -395,6 +583,43 @@ export default function AdminPanel({ currentUser, onRefreshApp }: AdminPanelProp
           : u.approved === false;
 
     return matchesSearch && matchesRole && matchesStatus;
+  });
+
+  const handleSort = (field: 'name' | 'role' | 'approved') => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const getSortIcon = (field: 'name' | 'role' | 'approved') => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="w-3 h-3 text-slate-400 group-hover:text-slate-600 transition-colors" />;
+    }
+    return sortDirection === 'asc' 
+      ? <ArrowUp className="w-3 h-3 text-emerald-600 font-bold" />
+      : <ArrowDown className="w-3 h-3 text-emerald-600 font-bold" />;
+  };
+
+  const sortedUsers = [...filteredUsers].sort((a, b) => {
+    if (!sortField) return 0;
+    let aVal: any = '';
+    let bVal: any = '';
+    if (sortField === 'name') {
+      aVal = a.name.toLowerCase();
+      bVal = b.name.toLowerCase();
+    } else if (sortField === 'role') {
+      aVal = a.role.toLowerCase();
+      bVal = b.role.toLowerCase();
+    } else if (sortField === 'approved') {
+      aVal = a.approved ? 1 : 0;
+      bVal = b.approved ? 1 : 0;
+    }
+    if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+    if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+    return 0;
   });
 
   return (
@@ -604,6 +829,13 @@ export default function AdminPanel({ currentUser, onRefreshApp }: AdminPanelProp
               {language === 'AZ' ? 'Toplu Yarat (XLS)' : 'Bulk Create (XLS)'}
             </button>
             <button
+              onClick={() => setShowCurriculumBulkModal(true)}
+              className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+            >
+              <BookOpen className="w-4 h-4 text-emerald-800" />
+              {language === 'AZ' ? 'Tədris Planı Yüklə (XLS)' : 'Import Curriculum (XLS)'}
+            </button>
+            <button
               onClick={() => setShowCreateModal(true)}
               className="px-4 py-2 bg-emerald-800 hover:bg-emerald-950 text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
             >
@@ -664,6 +896,106 @@ export default function AdminPanel({ currentUser, onRefreshApp }: AdminPanelProp
           </div>
         </div>
 
+        {/* Bulk Action Panel */}
+        <AnimatePresence>
+          {selectedEmails.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="p-4 bg-emerald-50 border-b border-emerald-100 flex flex-wrap items-center justify-between gap-4 text-xs font-semibold text-emerald-905"
+            >
+              <div className="flex items-center gap-2">
+                <span className="bg-emerald-200 text-emerald-900 px-2.5 py-1 rounded-full font-black font-mono">
+                  {selectedEmails.length}
+                </span>
+                <span>{language === 'AZ' ? 'istifadəçi seçildi' : 'users selected'}</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedEmails([])}
+                  className="text-slate-400 hover:text-slate-600 ml-2 font-bold cursor-pointer"
+                >
+                  {language === 'AZ' ? 'Seçimi təmizlə' : 'Clear selection'}
+                </button>
+              </div>
+
+              <form onSubmit={handleBulkActionSubmit} className="flex flex-wrap items-center gap-3">
+                <select
+                  value={bulkAction}
+                  onChange={e => {
+                    setBulkAction(e.target.value);
+                    setBulkPassword('');
+                  }}
+                  className="bg-white border border-emerald-200 rounded-lg px-2.5 py-1.5 font-bold focus:outline-none text-slate-700 cursor-pointer"
+                >
+                  <option value="">-- {language === 'AZ' ? 'Toplu Əməliyyat Seçin' : 'Select Bulk Action'} --</option>
+                  <option value="reset-password">{language === 'AZ' ? 'Şifrəni Dəyiş' : 'Reset Password'}</option>
+                  <option value="update-role">{language === 'AZ' ? 'Rolu Dəyiş' : 'Change Role'}</option>
+                  <option value="update-status">{language === 'AZ' ? 'Statusu Dəyiş' : 'Change Status'}</option>
+                  <option value="delete">{language === 'AZ' ? 'İstifadəçiləri Sil' : 'Delete Users'}</option>
+                </select>
+
+                {bulkAction === 'reset-password' && (
+                  <input
+                    type="text"
+                    value={bulkPassword}
+                    onChange={e => setBulkPassword(e.target.value)}
+                    placeholder={language === 'AZ' ? 'Yeni şifrə...' : 'New password...'}
+                    className="bg-white border border-emerald-200 rounded-lg px-2.5 py-1.5 text-slate-700 focus:outline-none placeholder-slate-400 font-medium"
+                    required
+                  />
+                )}
+
+                {bulkAction === 'update-role' && (
+                  <select
+                    value={bulkRole}
+                    onChange={e => setBulkRole(e.target.value as UserRole)}
+                    className="bg-white border border-emerald-200 rounded-lg px-2.5 py-1.5 text-slate-700 focus:outline-none font-semibold cursor-pointer"
+                  >
+                    <option value="student">{language === 'AZ' ? 'Tələbə' : 'Student'}</option>
+                    <option value="teacher">{language === 'AZ' ? 'Müəllim' : 'Teacher'}</option>
+                    <option value="head">{language === 'AZ' ? 'Proqram Rəhbəri' : 'Program Head'}</option>
+                    <option value="enterprise">{language === 'AZ' ? 'Müəssisə' : 'Enterprise'}</option>
+                  </select>
+                )}
+
+                {bulkAction === 'update-status' && (
+                  <select
+                    value={String(bulkStatus)}
+                    onChange={e => setBulkStatus(e.target.value === 'true')}
+                    className="bg-white border border-emerald-200 rounded-lg px-2.5 py-1.5 text-slate-700 focus:outline-none font-semibold cursor-pointer"
+                  >
+                    <option value="true">{language === 'AZ' ? 'Təsdiqlə (Aktiv)' : 'Approve (Active)'}</option>
+                    <option value="false">{language === 'AZ' ? 'Təsdiqi ləğv et (Blok)' : 'Disapprove (Block)'}</option>
+                  </select>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={!bulkAction || bulkSubmittingAction}
+                  onClick={(e) => {
+                    if (bulkAction === 'delete') {
+                      const msg = language === 'AZ' 
+                        ? `Seçilmiş ${selectedEmails.length} istifadəçini silmək istədiyinizdən əminsiniz? Bu əməliyyat geri qaytarıla bilməz!`
+                        : `Are you sure you want to delete the ${selectedEmails.length} selected users? This action cannot be undone!`;
+                      if (!window.confirm(msg)) {
+                        e.preventDefault();
+                      }
+                    }
+                  }}
+                  className={`px-4 py-1.5 rounded-lg font-black transition-all shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer ${
+                    bulkAction === 'delete'
+                      ? 'bg-red-600 hover:bg-red-700 text-white'
+                      : 'bg-emerald-800 hover:bg-emerald-950 text-white'
+                  }`}
+                >
+                  {bulkSubmittingAction ? t('pleaseWait') : (language === 'AZ' ? 'Tətbiq Et' : 'Apply')}
+                </button>
+              </form>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Table/List View */}
         <div className="overflow-x-auto">
           {loading && users.length === 0 ? (
@@ -682,17 +1014,47 @@ export default function AdminPanel({ currentUser, onRefreshApp }: AdminPanelProp
             <table className="w-full text-left border-collapse" id="admin-users-table">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  <th className="py-3 px-6">{language === 'AZ' ? 'İstifadəçi' : 'User'}</th>
-                  <th className="py-3 px-4">{language === 'AZ' ? 'Rol' : 'Role'}</th>
-                  <th className="py-3 px-4">{language === 'AZ' ? 'Şifrə' : 'Password'}</th>
-                  <th className="py-3 px-4">{language === 'AZ' ? 'Əlaqəli Detallar' : 'Associated Details'}</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-6 text-right">{language === 'AZ' ? 'Əməliyyatlar' : 'Actions'}</th>
+                  <th className="py-3 px-4 w-10 text-center select-none rounded-tl-xl">
+                    <input
+                      type="checkbox"
+                      checked={sortedUsers.length > 0 && sortedUsers.every(u => selectedEmails.includes(u.email))}
+                      onChange={handleSelectAllVisible}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500/20 cursor-pointer w-4 h-4"
+                    />
+                  </th>
+                  <th onClick={() => handleSort('name')} className="py-3 px-6 cursor-pointer group hover:bg-slate-100/70 transition-colors select-none">
+                    <div className="flex items-center gap-1.5 justify-start">
+                      {language === 'AZ' ? 'İstifadəçi' : 'User'}
+                      {getSortIcon('name')}
+                    </div>
+                  </th>
+                  <th onClick={() => handleSort('role')} className="py-3 px-4 cursor-pointer group hover:bg-slate-100/70 transition-colors select-none">
+                    <div className="flex items-center gap-1.5 justify-start">
+                      {language === 'AZ' ? 'Rol' : 'Role'}
+                      {getSortIcon('role')}
+                    </div>
+                  </th>
+                  <th className="py-3 px-4 select-none">{language === 'AZ' ? 'Əlaqəli Detallar' : 'Associated Details'}</th>
+                  <th onClick={() => handleSort('approved')} className="py-3 px-4 cursor-pointer group hover:bg-slate-100/70 transition-colors select-none">
+                    <div className="flex items-center gap-1.5 justify-start">
+                      Status
+                      {getSortIcon('approved')}
+                    </div>
+                  </th>
+                  <th className="py-3 px-6 text-right select-none rounded-tr-xl">{language === 'AZ' ? 'Əməliyyatlar' : 'Actions'}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs text-left">
-                {filteredUsers.map(u => (
-                  <tr key={u.email} className="hover:bg-slate-50/50 transition-colors">
+                {sortedUsers.map(u => (
+                  <tr key={u.email} className={`hover:bg-slate-50/50 transition-colors ${selectedEmails.includes(u.email) ? 'bg-emerald-50/20' : ''}`}>
+                    <td className="py-4 px-4 w-10 text-center select-none">
+                      <input
+                        type="checkbox"
+                        checked={selectedEmails.includes(u.email)}
+                        onChange={() => handleSelectUser(u.email)}
+                        className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500/20 cursor-pointer w-4 h-4"
+                      />
+                    </td>
                     {/* User profile */}
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
@@ -727,14 +1089,6 @@ export default function AdminPanel({ currentUser, onRefreshApp }: AdminPanelProp
                         {u.role === 'teacher' && (language === 'AZ' ? 'Müəllim' : 'Teacher')}
                         {u.role === 'enterprise' && (language === 'AZ' ? 'Müəssisə' : 'Enterprise')}
                         {u.role === 'student' && (language === 'AZ' ? 'Tələbə' : 'Student')}
-                      </span>
-                    </td>
-
-                    {/* Password */}
-                    <td className="py-4 px-4 font-mono text-[11px] text-slate-500">
-                      <span className="flex items-center gap-1">
-                        <Key className="w-3 h-3 text-slate-300" />
-                        {u.password || '123456'}
                       </span>
                     </td>
 
@@ -1304,6 +1658,167 @@ export default function AdminPanel({ currentUser, onRefreshApp }: AdminPanelProp
                   {bulkSubmitting 
                     ? (language === 'AZ' ? 'Yaradılır...' : 'Creating...') 
                     : (language === 'AZ' ? 'Hesabları Toplu Yarat' : 'Create Accounts in Bulk')}
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* BATCH CURRICULUM IMPORT MODAL */}
+      <AnimatePresence>
+        {showCurriculumBulkModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto text-left font-sans"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-2xl w-full overflow-hidden"
+            >
+              <div className="p-6 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                <div className="space-y-1">
+                  <h3 className="font-extrabold text-slate-800 text-base flex items-center gap-2">
+                    <BookOpen className="w-5 h-5 text-emerald-800" />
+                    {language === 'AZ' ? 'Tədris Planı Toplu Yüklə' : 'Import Curriculum in Bulk'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {language === 'AZ' ? 'Excel (CSV) sənədini yükləməklə toplu proqram və fənləri daxil edin.' : 'Import bulk programs and courses by uploading an Excel (CSV) template.'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowCurriculumBulkModal(false);
+                    setBulkCurriculumItems([]);
+                    setBulkCurriculumErrors([]);
+                    setBulkCurriculumPasteText('');
+                    setBulkCurriculumFile(null);
+                  }}
+                  className="p-1 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+                <div className="p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-bold text-emerald-950 flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5 text-emerald-700" />
+                      {language === 'AZ' ? 'Şablon Excel (CSV) faylını yükləyin' : 'Download Sample Excel (CSV)'}
+                    </h4>
+                    <p className="text-[10px] text-emerald-800/80 leading-normal">
+                      {language === 'AZ' 
+                        ? 'Excel-də proqram və fənləri hazırlamaq üçün şablon strukturu əldə edin.' 
+                        : 'Get the exact spreadsheet structure required for bulk curriculum import.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={downloadSampleCurriculumCSV}
+                    className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-[10px] rounded-lg transition-all flex items-center gap-1 cursor-pointer shrink-0 shadow-sm"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    {language === 'AZ' ? 'Excel Şablonunu Yüklə' : 'Download Excel Template'}
+                  </button>
+                </div>
+
+                <div className="space-y-2 text-left">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    {language === 'AZ' ? '1. Fayl yükləyin' : '1. Upload File'}
+                  </label>
+                  <div className="border-2 border-dashed border-slate-200 hover:border-emerald-500 rounded-2xl p-5 bg-slate-50/30 text-center hover:bg-white transition-all relative flex flex-col items-center justify-center min-h-[140px]">
+                    <input
+                      type="file"
+                      accept=".csv"
+                      onChange={handleCurriculumFileChange}
+                      className="absolute inset-0 opacity-0 cursor-pointer z-10 w-full h-full"
+                    />
+                    <Upload className="w-8 h-8 text-slate-400 mb-2" />
+                    <p className="text-xs font-bold text-slate-700">
+                      {bulkCurriculumFile ? bulkCurriculumFile.name : (language === 'AZ' ? 'Faylı bura sürükləyin və ya klikləyin' : 'Drag file here or click to select')}
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      CSV formatı (Excel tərəfindən dəstəklənir)
+                    </p>
+                  </div>
+                </div>
+
+                {bulkCurriculumErrors.length > 0 && (
+                  <div className="p-3.5 bg-red-50 text-red-800 rounded-2xl border border-red-100 flex items-start gap-2.5 text-xs text-left">
+                    <AlertCircle className="w-4 h-4 mt-0.5 text-red-600 shrink-0" />
+                    <div className="space-y-1">
+                      <p className="font-bold">{language === 'AZ' ? 'Format Xətaları Tapıldı:' : 'Formatting Errors Found:'}</p>
+                      <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-red-700 max-h-[120px] overflow-y-auto">
+                        {bulkCurriculumErrors.map((err, idx) => (
+                          <li key={idx}>{err}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+
+                {bulkCurriculumItems.length > 0 && (
+                  <div className="space-y-2 text-left">
+                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      {language === 'AZ' ? 'Yüklənəcək Tədris Planı Siyahısı' : 'Curriculum Items to Import'} ({bulkCurriculumItems.length})
+                    </h4>
+                    <div className="overflow-x-auto border border-slate-100 rounded-2xl max-h-[220px]">
+                      <table className="w-full text-[11px] text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-100 font-bold text-slate-400">
+                            <th className="py-2 px-3">{language === 'AZ' ? 'Proqram Kodu' : 'Prog Code'}</th>
+                            <th className="py-2 px-3">{language === 'AZ' ? 'Proqram Adı' : 'Prog Name'}</th>
+                            <th className="py-2 px-3">{language === 'AZ' ? 'Fənn Kodu' : 'Course Code'}</th>
+                            <th className="py-2 px-3">{language === 'AZ' ? 'Fənn Adı' : 'Course Name'}</th>
+                            <th className="py-2 px-3">{language === 'AZ' ? 'Kredit' : 'Credits'}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {bulkCurriculumItems.map((item, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50/40">
+                              <td className="py-2 px-3 font-mono text-slate-700">{item.programCode}</td>
+                              <td className="py-2 px-3 font-semibold text-slate-800">{item.programName}</td>
+                              <td className="py-2 px-3 font-mono text-emerald-800">{item.syllabusCode || '-'}</td>
+                              <td className="py-2 px-3 text-slate-600 font-medium">{item.syllabusName || '-'}</td>
+                              <td className="py-2 px-3 font-mono text-slate-500">{item.credits}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-6 border-t border-slate-100 flex justify-end gap-2 bg-slate-50/50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCurriculumBulkModal(false);
+                    setBulkCurriculumItems([]);
+                    setBulkCurriculumErrors([]);
+                    setBulkCurriculumPasteText('');
+                    setBulkCurriculumFile(null);
+                  }}
+                  className="px-4 py-2 border border-slate-200 hover:bg-slate-100 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  {language === 'AZ' ? 'Ləğv Et' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  disabled={bulkCurriculumSubmitting || bulkCurriculumItems.length === 0}
+                  onClick={handleCurriculumBulkSubmit}
+                  className="px-4 py-2 bg-emerald-800 hover:bg-emerald-950 text-white text-xs font-bold rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {bulkCurriculumSubmitting 
+                    ? (language === 'AZ' ? 'İdxal olunur...' : 'Importing...') 
+                    : (language === 'AZ' ? 'Tədris Planını İdxal Et' : 'Import Curriculum')}
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>

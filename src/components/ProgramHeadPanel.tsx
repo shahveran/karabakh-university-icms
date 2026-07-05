@@ -80,6 +80,10 @@ export default function ProgramHeadPanel({
   const [syllCode, setSyllCode] = useState('');
   const [syllName, setSyllName] = useState('');
   const [syllContent, setSyllContent] = useState('');
+  const [syllDescription, setSyllDescription] = useState('');
+  const [syllTopics, setSyllTopics] = useState('');
+  const [syllFiles, setSyllFiles] = useState('');
+  const [selectedSyllabusIdForAdd, setSelectedSyllabusIdForAdd] = useState('');
 
   // Syllabus Editing States
   const [editingSyllabusId, setEditingSyllabusId] = useState<string | null>(null);
@@ -90,6 +94,9 @@ export default function ProgramHeadPanel({
   const [editSyllCredits, setEditSyllCredits] = useState<number>(6);
   const [editSyllTeacherEmail, setEditSyllTeacherEmail] = useState('');
   const [editSyllTeacherEmails, setEditSyllTeacherEmails] = useState<string[]>([]);
+  const [editSyllDescription, setEditSyllDescription] = useState('');
+  const [editSyllTopics, setEditSyllTopics] = useState('');
+  const [editSyllFiles, setEditSyllFiles] = useState('');
 
   // Manual Syllabus creation credits state
   const [syllCredits, setSyllCredits] = useState<number>(6);
@@ -342,37 +349,52 @@ export default function ProgramHeadPanel({
 
   const handleAddSyllabusSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!syllProgramId || !syllCode.trim() || !syllName.trim() || !syllContent.trim()) return;
+    if (!syllProgramId || !selectedSyllabusIdForAdd || !syllContent.trim()) return;
     try {
-      const newSyll = await onAddSyllabus(
-        syllProgramId,
-        syllCode.trim(),
-        syllName.trim(),
-        syllContent.trim(),
-        syllCredits,
-        syllTeacherEmails[0] || undefined,
-        syllTeacherEmails
-      );
+      const parsedTopics = syllTopics
+        .split('\n')
+        .map(t => t.trim())
+        .filter(t => t.length > 0);
+
+      const parsedFiles = syllFiles
+        .split(',')
+        .map(f => f.trim())
+        .filter(f => f.length > 0);
+
+      await onUpdateSyllabus(selectedSyllabusIdForAdd, {
+        name: syllName,
+        code: syllCode,
+        content: syllContent,
+        credits: syllCredits,
+        teacherEmail: syllTeacherEmails[0] || null,
+        teacherEmails: syllTeacherEmails,
+        description: syllDescription,
+        topics: parsedTopics,
+        syllabusFiles: parsedFiles,
+        updateComment: language === 'AZ' ? 'Yeni sillabus məzmunu daxil edildi' : 'New syllabus content submitted'
+      });
       
       // Auto-upload manual syllabus to reference documents
-      if (newSyll && newSyll.id) {
-        try {
-          await onAddReferenceDoc(
-            syllName.trim(),
-            syllContent.trim(),
-            'syllabus',
-            newSyll.id,
-            `${(syllContent.length / 1024).toFixed(1)} KB`
-          );
-        } catch (docErr) {
-          console.error("Auto-uploading manual reference document failed:", docErr);
-        }
+      try {
+        await onAddReferenceDoc(
+          syllName.trim(),
+          syllContent.trim(),
+          'syllabus',
+          selectedSyllabusIdForAdd,
+          `${(syllContent.length / 1024).toFixed(1)} KB`
+        );
+      } catch (docErr) {
+        console.error("Auto-uploading manual reference document failed:", docErr);
       }
 
       setActionSuccess(language === 'AZ' ? 'Yeni fənn sillabusu uğurla əlavə edildi və avtomatik referans sənədlərə yükləndi!' : 'New subject syllabus successfully added and automatically uploaded to reference documents!');
       setSyllCode('');
       setSyllName('');
       setSyllContent('');
+      setSyllDescription('');
+      setSyllTopics('');
+      setSyllFiles('');
+      setSelectedSyllabusIdForAdd('');
       setSyllCredits(6);
       setSyllTeacherEmail('');
       setSyllTeacherEmails([]);
@@ -390,17 +412,33 @@ export default function ProgramHeadPanel({
     setEditSyllContent(syllabus.content);
     setEditSyllCredits(syllabus.credits || 6);
     setEditSyllComment('');
+    setEditSyllDescription(syllabus.description || '');
+    setEditSyllTopics(syllabus.topics ? syllabus.topics.join('\n') : '');
+    setEditSyllFiles(syllabus.syllabusFiles ? syllabus.syllabusFiles.join(', ') : '');
   };
 
   const handleUpdateSyllabusSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingSyllabusId) return;
     try {
+      const parsedTopics = editSyllTopics
+        .split('\n')
+        .map(t => t.trim())
+        .filter(t => t.length > 0);
+
+      const parsedFiles = editSyllFiles
+        .split(',')
+        .map(f => f.trim())
+        .filter(f => f.length > 0);
+
       await onUpdateSyllabus(editingSyllabusId, {
         name: editSyllName,
         code: editSyllCode,
         content: editSyllContent,
         credits: editSyllCredits,
+        description: editSyllDescription,
+        topics: parsedTopics,
+        syllabusFiles: parsedFiles,
         updateComment: editSyllComment || (language === 'AZ' ? 'Tədris proqramı çərçivəsində mövzu və idarəetmə yeniləməsi' : 'Topic and management update within the curriculum')
       });
       setActionSuccess(language === 'AZ' ? 'Sillabus uğurla yeniləndi! Əlaqəli ixtisas proqramı da avtomatik "Yenilənib" statusu aldı.' : 'Syllabus updated successfully! Associated specialty program also automatically received "Updated" status.');
@@ -431,6 +469,9 @@ export default function ProgramHeadPanel({
     setEditSyllTeacherEmail(syllabus.teacherEmail || '');
     setEditSyllTeacherEmails(syllabus.teacherEmails || (syllabus.teacherEmail ? [syllabus.teacherEmail] : []));
     setEditSyllComment('');
+    setEditSyllDescription(syllabus.description || '');
+    setEditSyllTopics(syllabus.topics ? syllabus.topics.join('\n') : '');
+    setEditSyllFiles(syllabus.syllabusFiles ? syllabus.syllabusFiles.join(', ') : '');
     setIsEditingSyll(false);
     setSelectedProg(null); // Close program modal if open
   };
@@ -459,6 +500,16 @@ export default function ProgramHeadPanel({
     e.preventDefault();
     if (!selectedSyll) return;
     try {
+      const parsedTopics = editSyllTopics
+        .split('\n')
+        .map(t => t.trim())
+        .filter(t => t.length > 0);
+
+      const parsedFiles = editSyllFiles
+        .split(',')
+        .map(f => f.trim())
+        .filter(f => f.length > 0);
+
       await onUpdateSyllabus(selectedSyll.id, {
         name: editSyllName,
         code: editSyllCode,
@@ -466,6 +517,9 @@ export default function ProgramHeadPanel({
         credits: editSyllCredits,
         teacherEmail: editSyllTeacherEmails[0] || null,
         teacherEmails: editSyllTeacherEmails,
+        description: editSyllDescription,
+        topics: parsedTopics,
+        syllabusFiles: parsedFiles,
         updateComment: editSyllComment || (language === 'AZ' ? 'Tədris fənninin məzmununda və kredit həcmində düzəliş' : 'Correction in subject syllabus content and credit volume')
       });
       setActionSuccess(language === 'AZ' ? 'Sillabus uğurla yeniləndi!' : 'Syllabus updated successfully!');
@@ -991,52 +1045,36 @@ export default function ProgramHeadPanel({
                           <span className="text-[9px] font-extrabold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 uppercase tracking-wider border border-emerald-100">
                             {language === 'AZ' ? 'Təhlil Olunmuş İxtisas Proqramı' : 'Parsed Specialty Program'}
                           </span>
-                          <h4 className="font-bold text-slate-800 text-sm mt-1">{parsedResult.name}</h4>
                         </div>
                         <span className="text-[10px] text-slate-400 italic">
                           {language === 'AZ' ? 'Fayl:' : 'File:'} {parsedDocName}
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                        {/* Summary */}
-                        <div className="space-y-1">
-                          <h5 className="font-bold text-slate-700 uppercase tracking-wide text-[10px]">
-                            {language === 'AZ' ? 'Ümumi Məcmuə (Xülasə)' : 'General Summary'}
-                          </h5>
-                          <p className="text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100 max-h-[140px] overflow-y-auto whitespace-pre-wrap">
-                            {parsedResult.summary}
-                          </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-left">
+                        {/* Edit fields */}
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'İXTİSAS PROQRAMININ ADI' : 'SPECIALTY PROGRAM NAME'}</label>
+                            <input
+                              type="text"
+                              value={parsedResult.name}
+                              onChange={e => setParsedResult(prev => prev ? { ...prev, name: e.target.value } : null)}
+                              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-semibold"
+                              required
+                            />
+                          </div>
                         </div>
 
-                        {/* Targets & Keywords */}
-                        <div className="space-y-3">
-                          <div className="space-y-1">
-                            <h5 className="font-bold text-slate-700 uppercase tracking-wide text-[10px]">
-                              {language === 'AZ' ? 'Çıxarılan Hədəflər' : 'Extracted Targets'}
-                            </h5>
-                            <ul className="space-y-1 max-h-[80px] overflow-y-auto">
-                              {parsedResult.targets.map((t, idx) => (
-                                <li key={idx} className="text-slate-600 leading-normal flex items-start gap-1 font-sans">
-                                  <span className="text-emerald-700 font-bold shrink-0">•</span>
-                                  <span>{t}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-
-                          <div className="space-y-1">
-                            <h5 className="font-bold text-slate-700 uppercase tracking-wide text-[10px]">
-                              {language === 'AZ' ? 'Əsas Mövzular & Key-lər' : 'Core Topics & Keys'}
-                            </h5>
-                            <div className="flex flex-wrap gap-1.5">
-                              {parsedResult.keywords.map((k, idx) => (
-                                <span key={idx} className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] font-medium border border-slate-200">
-                                  {k}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'PROQRAM TƏSVİRİ / XÜLASƏSİ' : 'PROGRAM DESCRIPTION / SUMMARY'}</label>
+                          <textarea
+                            value={parsedResult.summary}
+                            onChange={e => setParsedResult(prev => prev ? { ...prev, summary: e.target.value } : null)}
+                            rows={5}
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-semibold"
+                            required
+                          />
                         </div>
                       </div>
 
@@ -1308,44 +1346,44 @@ export default function ProgramHeadPanel({
                           <span className="text-[9px] font-extrabold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 uppercase tracking-wider border border-emerald-100">
                             {language === 'AZ' ? 'Təhlil Olunmuş Fənn Sillabusu' : 'Parsed Subject Syllabus'}
                           </span>
-                          <h4 className="font-bold text-slate-800 text-sm mt-1">{parsedResult.name}</h4>
                         </div>
                         <span className="text-[10px] text-slate-400 italic">{language === 'AZ' ? 'Fayl:' : 'File:'} {parsedDocName}</span>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                        {/* Summary */}
-                        <div className="space-y-1">
-                          <h5 className="font-bold text-slate-700 uppercase tracking-wide text-[10px]">{language === 'AZ' ? 'Ümumi Məcmuə (Xülasə)' : 'General Summary'}</h5>
-                          <p className="text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100 max-h-[140px] overflow-y-auto whitespace-pre-wrap">
-                            {parsedResult.summary}
-                          </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-left">
+                        {/* Edit fields */}
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'FƏNN KODU' : 'COURSE CODE'}</label>
+                            <input
+                              type="text"
+                              value={parsedResult.suggestedCode || ''}
+                              onChange={e => setParsedResult(prev => prev ? { ...prev, suggestedCode: e.target.value } : null)}
+                              placeholder="PED-101"
+                              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-semibold"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'FƏNNİN ADI' : 'SUBJECT NAME'}</label>
+                            <input
+                              type="text"
+                              value={parsedResult.name}
+                              onChange={e => setParsedResult(prev => prev ? { ...prev, name: e.target.value } : null)}
+                              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-semibold"
+                              required
+                            />
+                          </div>
                         </div>
 
-                        {/* Targets & Keywords */}
-                        <div className="space-y-3">
-                          <div className="space-y-1">
-                            <h5 className="font-bold text-slate-700 uppercase tracking-wide text-[10px]">{language === 'AZ' ? 'Çıxarılan Hədəflər' : 'Extracted Targets'}</h5>
-                            <ul className="space-y-1 max-h-[80px] overflow-y-auto">
-                              {parsedResult.targets.map((t, idx) => (
-                                <li key={idx} className="text-slate-600 leading-normal flex items-start gap-1 font-sans">
-                                  <span className="text-emerald-700 font-bold shrink-0">•</span>
-                                  <span>{t}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-
-                          <div className="space-y-1">
-                            <h5 className="font-bold text-slate-700 uppercase tracking-wide text-[10px]">{language === 'AZ' ? 'Əsas Mövzular & Key-lər' : 'Core Topics & Keys'}</h5>
-                            <div className="flex flex-wrap gap-1.5">
-                              {parsedResult.keywords.map((k, idx) => (
-                                <span key={idx} className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] font-medium border border-slate-200">
-                                  {k}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'FƏNNİN MƏZMUNU / SİLLABUS XÜLASƏSİ' : 'SYLLABUS CONTENT / SUMMARY'}</label>
+                          <textarea
+                            value={parsedResult.summary}
+                            onChange={e => setParsedResult(prev => prev ? { ...prev, summary: e.target.value } : null)}
+                            rows={5}
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-semibold"
+                            required
+                          />
                         </div>
                       </div>
  
@@ -1514,18 +1552,47 @@ export default function ProgramHeadPanel({
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNN KODU' : 'COURSE CODE'}</label>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNN SEÇİN *' : 'SELECT SUBJECT *'}</label>
+                      <select
+                        value={selectedSyllabusIdForAdd}
+                        onChange={e => {
+                          const sId = e.target.value;
+                          setSelectedSyllabusIdForAdd(sId);
+                          const found = (syllabi || []).find(s => s.id === sId);
+                          if (found) {
+                            setSyllCode(found.code);
+                            setSyllName(found.name);
+                            setSyllCredits(found.credits || 6);
+                          } else {
+                            setSyllCode('');
+                            setSyllName('');
+                          }
+                        }}
+                        className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-bold"
+                        required
+                      >
+                        <option value="">{language === 'AZ' ? '-- Fənn Seçin --' : '-- Select Subject --'}</option>
+                        {(syllabi || [])
+                          .filter(s => s.programId === syllProgramId && !s.archived)
+                          .map(s => (
+                            <option key={s.id} value={s.id}>{s.code} — {s.name}</option>
+                          ))
+                        }
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNN KODU (OXUNMA)' : 'COURSE CODE (READONLY)'}</label>
                       <input
                         type="text"
                         value={syllCode}
-                        onChange={e => setSyllCode(e.target.value)}
-                        placeholder={language === 'AZ' ? 'Məs. INF-401' : 'E.g. INF-401'}
-                        className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                        readOnly
+                        placeholder={language === 'AZ' ? 'Siyahıdan seçin' : 'Select from list'}
+                        className="w-full px-3 py-2 bg-slate-100 rounded-xl border border-slate-200 text-xs focus:outline-none cursor-not-allowed font-semibold text-slate-500"
                         required
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNNİN ADI' : 'SUBJECT NAME'}</label>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNNİN ADI (OXUNMA)' : 'SUBJECT NAME (READONLY)'}</label>
                       <input
                         type="text"
                         value={syllName}
@@ -1742,6 +1809,38 @@ export default function ProgramHeadPanel({
                     rows={6}
                     className="w-full px-3 py-2 bg-white rounded-xl border border-emerald-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 resize-none font-mono"
                     required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-emerald-900 mb-1">{language === 'AZ' ? 'FƏNNİN ƏTRAFLI TƏSVİRİ (DESCRIPTION)' : 'COURSE DESCRIPTION'}</label>
+                  <textarea
+                    value={editSyllDescription}
+                    onChange={e => setEditSyllDescription(e.target.value)}
+                    rows={3}
+                    className="w-full px-3 py-2 bg-white rounded-xl border border-emerald-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-emerald-900 mb-1">{language === 'AZ' ? 'HƏFTƏLİK MÖVZULAR (HƏR SƏTİRDƏ BİR MÖVZU)' : 'WEEKLY TOPICS (ONE PER LINE)'}</label>
+                  <textarea
+                    value={editSyllTopics}
+                    onChange={e => setEditSyllTopics(e.target.value)}
+                    rows={4}
+                    placeholder={language === 'AZ' ? "Hefte 1: Giris\nHefte 2: Alqoritmler" : "Week 1: Introduction\nWeek 2: Algorithms"}
+                    className="w-full px-3 py-2 bg-white rounded-xl border border-emerald-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-emerald-900 mb-1">{language === 'AZ' ? 'SİLLABUS SƏNƏDLƏRİ (VERGÜLLƏ AYRILMIŞ LİNKLƏR)' : 'SYLLABUS DOCUMENTS (COMMA SEPARATED URLS)'}</label>
+                  <input
+                    type="text"
+                    value={editSyllFiles}
+                    onChange={e => setEditSyllFiles(e.target.value)}
+                    placeholder="https://example.com/syllabus.pdf"
+                    className="w-full px-3 py-2 bg-white rounded-xl border border-emerald-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-semibold"
                   />
                 </div>
 
@@ -2000,7 +2099,7 @@ export default function ProgramHeadPanel({
                                     </div>
 
                                     <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between" onClick={e => e.stopPropagation()}>
-                                      {syll.updatesLog && syll.updatesLog.length > 0 ? (
+                                      {syll.updatesLog && syll.updatesLog.length > 1 ? (
                                         <span className="text-[10px] text-emerald-700 flex items-center gap-1 font-semibold">
                                           <History className="w-3.5 h-3.5" />
                                           {language === 'AZ' ? 'Yenilənmə mövcuddur' : 'Update available'}
@@ -2196,7 +2295,11 @@ export default function ProgramHeadPanel({
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
                         <span className="font-extrabold text-[11px] text-slate-700 uppercase tracking-wider flex items-center gap-1">
                           <Layers className="w-3.5 h-3.5 text-indigo-500" />
-                          {language === 'AZ' ? 'Müəllim ilə Əməkdaşlıq' : 'Teacher Collaboration'}
+                          {item.teacherFeedbackStatus === 'pending_review'
+                            ? (language === 'AZ' ? '⚠️ Müəllim Rəyi Təsdiq Gözləyir' : '⚠️ Teacher Feedback Awaiting Review')
+                            : item.teacherFeedbackStatus === 'approved'
+                            ? (language === 'AZ' ? '✅ Müəllim Rəyi Təsdiqləndi' : '✅ Teacher Feedback Approved')
+                            : (language === 'AZ' ? 'Müəllimə Yönləndir (İxtiyari)' : 'Forward to Teacher (Optional)')}
                         </span>
                         {item.assignedTeacherEmail ? (
                           <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded text-[10px] font-black">
@@ -3162,7 +3265,7 @@ export default function ProgramHeadPanel({
                                 </p>
                               </div>
                             </div>
-                            <span className="self-start sm:self-center px-3 py-1 bg-emerald-50 text-emerald-850 border border-emerald-200 rounded-xl text-[10px] font-bold uppercase tracking-wider">
+                            <span className="self-start sm:self-center px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-[10px] font-bold uppercase tracking-wider">
                               {totalDocsCount} {language === 'AZ' ? 'Sənəd' : 'Docs'}
                             </span>
                           </div>
@@ -3656,6 +3759,38 @@ export default function ProgramHeadPanel({
                         rows={8}
                         className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 resize-none font-mono"
                         required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNNİN ƏTRAFLI TƏSVİRİ (DESCRIPTION)' : 'COURSE DESCRIPTION'}</label>
+                      <textarea
+                        value={editSyllDescription}
+                        onChange={e => setEditSyllDescription(e.target.value)}
+                        rows={3}
+                        className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'HƏFTƏLİK MÖVZULAR (HƏR SƏTİRDƏ BİR MÖVZU)' : 'WEEKLY TOPICS (ONE PER LINE)'}</label>
+                      <textarea
+                        value={editSyllTopics}
+                        onChange={e => setEditSyllTopics(e.target.value)}
+                        rows={4}
+                        placeholder={language === 'AZ' ? "Hefte 1: Giris\nHefte 2: Alqoritmler" : "Week 1: Introduction\nWeek 2: Algorithms"}
+                        className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'SİLLABUS SƏNƏDLƏRİ (VERGÜLLƏ AYRILMIŞ LİNKLƏR)' : 'SYLLABUS DOCUMENTS (COMMA SEPARATED URLS)'}</label>
+                      <input
+                        type="text"
+                        value={editSyllFiles}
+                        onChange={e => setEditSyllFiles(e.target.value)}
+                        placeholder="https://example.com/syllabus.pdf"
+                        className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-semibold"
                       />
                     </div>
 

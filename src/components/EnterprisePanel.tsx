@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Program, Syllabus, SuggestionCase, User } from '../types';
 import { useLanguage } from '../LanguageContext';
 import { motion } from 'motion/react';
-import { Send, Building2, CheckCircle2, Clock, XCircle, AlertCircle, Sparkles, Plus } from 'lucide-react';
+import { Send, Building2, CheckCircle2, Clock, XCircle, AlertCircle, Sparkles, Plus, ChevronRight } from 'lucide-react';
 import Logo from './Logo';
 
 interface EnterprisePanelProps {
@@ -22,16 +22,58 @@ export default function EnterprisePanel({
 }: EnterprisePanelProps) {
   const { language, t } = useLanguage();
   const [title, setTitle] = useState('');
+
+  // Progress tracker: determines which stages are completed for a case
+  const CaseProgressTracker = ({ item }: { item: SuggestionCase }) => {
+    const isRejected = item.status === 'Rədd edildi';
+    const isTerminal = item.status === 'Tətbiq olundu' || item.status === 'Qəbul edildi' || isRejected;
+    let activeStage = 0;
+    if (item.status !== 'Gözləmədə') activeStage = 1;
+    if (item.assignedTeacherEmail) activeStage = 2;
+    if (item.teacherFeedbackStatus && item.teacherFeedbackStatus !== 'none') activeStage = 3;
+    if (isTerminal) activeStage = 4;
+    const azStages = ['Göndərildi', 'Rəhbər baxdı', 'Müəllimə', 'Rəy yazıldı', 'Nəticə'];
+    const enStages = ['Sent', 'Reviewed', 'To Teacher', 'Feedback', 'Decision'];
+    const stages = language === 'AZ' ? azStages : enStages;
+    return (
+      <div className="mt-2 pt-3 border-t border-slate-100">
+        <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-2">
+          {language === 'AZ' ? 'Mərhələ' : 'Progress'}
+        </p>
+        <div className="flex items-center gap-0.5">
+          {stages.map((stage, idx) => {
+            const done = idx <= activeStage;
+            const isLast = idx === stages.length - 1;
+            const lastColor = isRejected ? 'bg-red-500 text-white border-red-500' : 'bg-emerald-600 text-white border-emerald-600';
+            return (
+              <React.Fragment key={idx}>
+                <div className="flex flex-col items-center gap-0.5" style={{ minWidth: 0, flex: 1 }}>
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-[9px] font-bold transition-all ${
+                    done ? (isLast ? lastColor : 'bg-emerald-600 text-white border-emerald-600') : 'bg-white text-slate-300 border-slate-200'
+                  }`}>{done ? (isLast && isRejected ? '×' : '✓') : idx + 1}</div>
+                  <span className={`text-[9px] text-center leading-tight font-medium ${
+                    done ? (isLast && isRejected ? 'text-red-600' : 'text-emerald-700') : 'text-slate-400'
+                  }`} style={{ maxWidth: 44 }}>{stage}</span>
+                </div>
+                {!isLast && <div className={`h-0.5 flex-1 mt-[-10px] rounded ${idx < activeStage ? 'bg-emerald-500' : 'bg-slate-200'}`} />}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  const activePrograms = programs.filter(p => !p.archived);
   const [type, setType] = useState('Bazar tələbi');
-  const [selectedProgramId, setSelectedProgramId] = useState(programs[0]?.id || '');
+  const [selectedProgramId, setSelectedProgramId] = useState(activePrograms[0]?.id || '');
   const [selectedSyllabusId, setSelectedSyllabusId] = useState('');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Filter syllabi dynamically based on selected program
-  const filteredSyllabi = syllabi.filter(s => s.programId === selectedProgramId);
+  // Filter syllabi dynamically based on selected program and ensure not archived
+  const filteredSyllabi = syllabi.filter(s => s.programId === selectedProgramId && !s.archived);
 
   // Filter suggestions submitted by this enterprise
   const enterpriseSuggestions = suggestions.filter(
@@ -199,7 +241,7 @@ export default function EnterprisePanel({
                   }}
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-xs transition-all bg-white text-slate-700 font-semibold cursor-pointer"
                 >
-                  {programs.map(prog => (
+                  {activePrograms.map(prog => (
                     <option key={prog.id} value={prog.id}>
                       {prog.name.length > 25 ? `${prog.name.slice(0, 25)}...` : prog.name}
                     </option>
@@ -235,7 +277,7 @@ export default function EnterprisePanel({
                 onChange={e => setDescription(e.target.value)}
                 rows={5}
                 placeholder={language === 'AZ' ? 'Müəssisənizdə pedaqoji təcrübə keçən tələbələrdə gördüyünüz əskiklikləri, müasir məktəblərin gələcək müəllimlərdən gözlədiyi yeni bacarıq və texnologiyaları ətraflı qeyd edin...' : 'Detail the gaps observed in students doing teaching internships, or new skills and technologies modern schools expect from future teachers...'}
-                className="w-full px-4 py-2.5 text-slate-850 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm transition-all resize-none"
+                className="w-full px-4 py-2.5 text-slate-800 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm transition-all resize-none"
                 required
               />
             </div>
@@ -373,6 +415,9 @@ export default function EnterprisePanel({
                         )}
                       </div>
                     )}
+
+                    {/* Progress tracker */}
+                    <CaseProgressTracker item={item} />
                   </motion.div>
                 );
               })}

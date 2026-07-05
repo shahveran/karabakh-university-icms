@@ -18431,6 +18431,14 @@
       "details": "",
       "password": "82740a951bd30d40f1cf2e38088a9d32:db86be8461d558dee3f739c0134bc4a581f7925adf0259a9bde2420c26bb1c9be334b4978df0c5a4676c7e339f1ff7180a81228fa62d42d17e8968afc626ed7f",
       "approved": true
+    },
+    {
+      "email": "munsif@qu.edu.az",
+      "name": "QS Reimagine Münsif",
+      "role": "observer",
+      "details": "QS Reimagine Monitorinq və Qiymətləndirmə",
+      "password": "db65c287ebc51f7d54652f431e31b548:82a1f5bca2bfed0b46444e8261dc6e3a5f5d00dd4cad7736e238c49d9f629d5821950c6e452e1484b8ffd499219629830653104666ba975c54c76c64c4ce4d39",
+      "approved": true
     }
   ],
   "programs": [
@@ -18439,9 +18447,10 @@
       "name": "6001001 – Azərbaycan dili və ədəbiyyatı müəllimliyi ixtisası üzrə Bakalavr Təhsil Proqramı",
       "description": "Bu sənəd Qarabağ Universitetində '6001001 – Azərbaycan dili və ədəbiyyatı müəllimliyi' ixtisası üzrə bakalavr hazırlığını həyata keçirmək məqsədilə tərtib olunmuş çərçivə təhsil proqramıdır. Sənəd məzunların ümumi və peşə kompetensiyalarını, fənlər üzrə təlim və öyrənmə metodlarını, qiymətləndirmə üsullarını və təlim nəticələrini müəyyənləşdirir. Proqram ümumilikdə 240 AKTS kreditindən ibarət olub, tələbələrin həftəlik iş yükünü və fənlər üzrə bölgüsünü tənzimləyir.\n\nTəhsil proqramının məzmununa ümumi fənlər (Azərbaycan tarixi, kommunikasiya bacarıqları, ingilis dili) və geniş ixtisas fənləri (dilçilik, fonetika, leksikologiya, morfologiya, sintaksis, ədəbiyyat və dil tədrisi metodikası, yaradıcı yazı sahələri) daxildir. Tədris prosesində tələbəyönümlü yanaşmanı rəhbər tutan mühazirə, seminar, layihə əsaslı öyrənmə və tərs sinif kimi müasir interaktiv metodlardan istifadə nəzərdə tutulur.\n\nSənəddə, həmçinin rəqəmsal pedaqogika, yardımçı tədris texnologiyaları, inklüziv təhsil prinsipləri, məktəb mühitində pedaqoji təcrübənin təşkili və təhsilin 'Capstone' layihə işi ilə tamamlanması qaydaları, eləcə də məzunların gələcək karyera və magistratura pilləsində təhsili davam etdirmək imkanları geniş şəkildə işıqlandırılmışdır.\n\nHədəflər:\n- Tələbələrin Azərbaycan dilinin fonetik, leksik, qrammatik və üslubi sisteminə dair dərin nəzəri və praktiki biliklərə yiyələnməsini təmin etmək.\n- Şagirdyönümlü, inklüziv və diferensiallaşdırılmış təlim metodlarını, müasir kurikulum və qiymətləndirmə strategiyalarını tətbiq edə bilən peşəkar pedaqoqlar hazırlamaq.\n- Tələbələrdə yaradıcı təfəkkür, tənqidi düşüncə, akademik yazı və yaradıcı yazı (poeziya, nəsr, dramaturgiya) üzrə yüksək səviyyəli bacarıqlar formalaşdırmaq.\n- Tədris prosesinə rəqəmsal pedaqogika, yardımçı təlim texnologiyaları və müasir İKT alətlərini (LMS, Teams və s.) effektiv şəkildə inteqrasiya etmək bacarığını aşılamaq.\n- Məzunların milli-mənəvi dəyərlərə, dövlətçilik ideologiyasına və peşə etikasına sadiq, fəal vətəndaş və tədqiqatçı kimi formalaşmasını dəstəkləmək.\n\nAçar mövzular:\nAzərbaycan dili və ədəbiyyatı müəllimliyi, Təhsil proqramı, Pedaqoji kompetensiya, Kurikulum və qiymətləndirmə, Yaradıcı yazı, Rəqəmsal pedaqogika, İnklüziv təhsil, Pedaqoji təcrübə",
       "version": "v1.0",
-      "lastUpdated": "2026-07-03",
+      "lastUpdated": "2026-07-04",
       "status": "Yenilənib",
       "updatesLog": [
+        "2026-07-04: \"Təhsilə giriş\" sillabusu yeniləndi.",
         "2026-07-03: \"Ağdam məktəblərində rəqəmsal lövhə infrastrukturunun idarə edilməsi və pedaqoji adaptasiya problemi.\" adlı keysə əsasən yenilənmə edildi. Detal: Smartboard Dərs əlavə olundu",
         "Proqram yaradıldı və təsdiq olundu."
       ],
@@ -18459,9 +18468,10 @@
       "programId": "prog-1783111929220",
       "code": "EDU100",
       "name": "Təhsilə giriş",
-      "content": "Məcmuə:\nTəhsilə giriş fənni tələbələrin təhsil fenomenini çoxşaxəli aspektlərdən (fəlsəfi, tarixi, sosial və psixoloji) təhlil etməsinə şərait yaradır və gələcək müəllimlərin pedaqoji düşüncə tərzinin formalaşdırılmasına xidmət edir. Kurs çərçivəsində təhsilin cəmiyyətdə rolu, şəxsiyyətin formalaşmasında əhəmiyyəti, müəllimlik peşəsinin etik və peşəkar tələbləri, həmçinin müasir təhsil sistemində baş verən dəyişikliklər müzakirə olunur. Fənn nəzəri biliklərin praktik situasiyalarla əlaqələndirilməsi əsasında tələbə-mərkəzli yanaşma ilə tədris edilir. Bununla yanaşı, tələbələr Azərbaycan təhsil sisteminin hüquqi və struktur əsaslarını, kurikulumların hazırlanması prinsiplərini, eləcə də XXI əsr bacarıqlarını və müasir təhsil tendensiyalarını öyrənirlər. Bu proses gələcəyin müəllimlərində həm nəzəri dünyagörüşünü, həm də sinif fəaliyyətində tələb olunan praktik metodoloji bacarıqları formalaşdırır.\n\nHədəflər:\n- Təhsilin əsas anlayışlarını, funksiyalarını və növlərini izah etmək və onları real təhsil kontekstləri ilə əlaqələndirmək\n- Təhsilin tarixi inkişaf mərhələlərini, sosioloji, fəlsəfi və psixoloji əsaslarını müqayisəli şəkildə təhlil etmək\n- Müəllimlik peşəsinin etik və peşəkar xüsusiyyətlərini izah etmək və təhsil haqqında normativ sənədləri praktik şəkildə şərh etmək\n- Müasir təhsil sisteminin strukturunu, kurikulum, sillabus və qiymətləndirmə mexanizmlərini mənimsəmək\n- Tələbələrdə elmi tədqiqat metodları və XXI əsr bacarıqları əsasında pedaqoji düşüncə formalaşdırmaq\n\nAçar fəsillər / mövzular (Key-lər):\n- təhsilin əsasları\n- təhsil fəlsəfəsi\n- təhsil psixologiyası\n- müəllimlik peşəsi\n- təhsil hüququ\n- kurikulum və qiymətləndirmə\n- XXI əsr bacarıqları\n- təhsil sosiologiyası\n\n[MÜƏSSİSƏ/TƏLƏBƏ KEYSİ ƏSASINDA ƏLAVƏ]: Smartboard Dərs əlavə olundu",
-      "lastUpdated": "2026-07-03",
+      "content": "Mecmue: Tehsile giris fenni test meqsedile yenilendi. Hedefler: - Tehsilin esaslarini oyrenmek. Acar fesiller: - giris.",
+      "lastUpdated": "2026-07-04",
       "updatesLog": [
+        "2026-07-04: Sillabus mezmunu test ucun yenilendi.",
         "2026-07-03: Tələbə/Müəssisə keysi əsasında yeniləndi: \"Ağdam məktəblərində rəqəmsal lövhə infrastrukturunun idarə edilməsi və pedaqoji adaptasiya problemi.\"",
         "Sillabus yaradıldı."
       ],
@@ -18583,7 +18593,7 @@
       "id": "notif-1783113036408-murad.mammadov@qu.edu.az",
       "userEmail": "murad.mammadov@qu.edu.az",
       "message": "Müəllim (ruhiyya.mammadova@qu.edu.az) \"Ağdam məktəblərində rəqəmsal lövhə infrastrukturunun idarə edilməsi və pedaqoji adaptasiya problemi.\" keysi üzrə analizi və dəyişiklikləri təqdim etdi. Sizin təsdiqiniz gözlənilir.",
-      "read": false,
+      "read": true,
       "createdAt": "2026-07-03T21:10:36.408Z"
     },
     {
@@ -18660,7 +18670,7 @@
       "id": "notif-1783112707811-murad.mammadov@qu.edu.az",
       "userEmail": "murad.mammadov@qu.edu.az",
       "message": "Qəmər Abduləzimova tərəfindən yeni təklif daxil oldu: \"Ağdam məktəblərində rəqəmsal lövhə infrastrukturunun idarə edilməsi və pedaqoji adaptasiya problemi.\"",
-      "read": false,
+      "read": true,
       "createdAt": "2026-07-03T21:05:07.811Z"
     },
     {

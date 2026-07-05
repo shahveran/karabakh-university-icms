@@ -1,4 +1,4 @@
-export type UserRole = 'student' | 'enterprise' | 'head' | 'admin' | 'teacher';
+export type UserRole = 'student' | 'enterprise' | 'head' | 'admin' | 'teacher' | 'observer';
 
 export interface User {
   email: string;
@@ -20,6 +20,7 @@ export interface Program {
   totalCredits?: number;
   createdBy?: string;
   allowedHeads?: string[];
+  archived?: boolean;
 }
 
 export interface Syllabus {
@@ -33,6 +34,10 @@ export interface Syllabus {
   credits?: number;
   teacherEmail?: string;
   teacherEmails?: string[];
+  archived?: boolean;
+  description?: string;
+  syllabusFiles?: string[];
+  topics?: string[];
 }
 
 export interface SuggestionCase {
@@ -75,6 +80,13 @@ export interface Notification {
   createdAt: string;
 }
 
+export interface AIAnalysisCache {
+  key: string;         // hash of programId + syllabusId + sorted suggestionIds
+  result: AIAnalysisResponse;
+  cachedAt: string;    // ISO timestamp
+  expiresAt: string;   // ISO timestamp (24h from cachedAt)
+}
+
 export interface DatabaseState {
   users: User[];
   programs: Program[];
@@ -82,6 +94,7 @@ export interface DatabaseState {
   suggestions: SuggestionCase[];
   notifications: Notification[];
   referenceDocs?: ReferenceDocument[];
+  aiAnalysisCache?: AIAnalysisCache[];
 }
 
 export interface AIAnalysisRequest {
@@ -110,4 +123,8 @@ export interface AIAnalysisResponse {
   karabakhContext: string;
   specificSectionModifications?: SpecificSectionModification[];
   referenceDocMatches?: ReferenceDocMatch[];
+  title?: string;
+  summary?: string;
+  strategicGoals?: string[];
+  newContent?: string;
 }

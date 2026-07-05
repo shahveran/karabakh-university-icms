@@ -44,10 +44,17 @@ export default function TeacherPanel({
 }: TeacherPanelProps) {
   const { language, t } = useLanguage();
 
+  // Check if simulated or actual user is an administrator
+  const isActualAdmin = users.some(u => u.email === currentUser?.email && u.role === 'admin') ||
+                        currentUser?.email === 'admin@qu.edu.az' ||
+                        currentUser?.email === 'admin@karabakh.edu.az';
+
   // Core teacher filter logic
   // Teacher owns syllabi where teacherEmail equals currentUser.email or currentUser.email is in teacherEmails (case-insensitive check)
+  // Admins simulating a teacher see and own all syllabi for testing purposes
   const mySyllabi = syllabi.filter(s => {
     if (!currentUser?.email) return false;
+    if (isActualAdmin) return true;
     const curEmail = currentUser.email.toLowerCase().trim();
     const isPrimaryTeacher = s.teacherEmail ? s.teacherEmail.toLowerCase().trim() === curEmail : false;
     const isCoTeacher = s.teacherEmails ? s.teacherEmails.some(email => email.toLowerCase().trim() === curEmail) : false;
@@ -80,6 +87,7 @@ export default function TeacherPanel({
   const [syllCode, setSyllCode] = useState('');
   const [syllName, setSyllName] = useState('');
   const [syllContent, setSyllContent] = useState('');
+  const [selectedSyllabusIdForAdd, setSelectedSyllabusIdForAdd] = useState('');
   const [syllCredits, setSyllCredits] = useState<number>(6);
 
   const [parsedRawText, setParsedRawText] = useState('');
@@ -99,6 +107,9 @@ export default function TeacherPanel({
   const [editSyllContent, setEditSyllContent] = useState('');
   const [editSyllComment, setEditSyllComment] = useState('');
   const [editSyllCredits, setEditSyllCredits] = useState<number>(6);
+  const [editSyllDescription, setEditSyllDescription] = useState('');
+  const [editSyllTopics, setEditSyllTopics] = useState('');
+  const [editSyllFiles, setEditSyllFiles] = useState('');
 
   // Manual Evaluation States
   const [evaluatingCaseId, setEvaluatingCaseId] = useState<string | null>(null);
@@ -139,6 +150,7 @@ export default function TeacherPanel({
   // Filter reference documents so teacher only sees ones associated with their own programs/syllabi or general ones
   const teacherRefDocs = (referenceDocs || []).filter(doc => {
     if (doc.type === 'general') return true;
+    if (isActualAdmin) return true; // Admins simulating teacher see all docs
     if (doc.associatedId) {
       return myProgramIdsArray.includes(doc.associatedId) || mySyllabiIds.includes(doc.associatedId);
     }
@@ -341,7 +353,7 @@ export default function TeacherPanel({
 
   const handleAddSyllabusSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!syllProgramId || !syllCode || !syllName || !syllContent) {
+    if (!syllProgramId || !selectedSyllabusIdForAdd || !syllContent.trim()) {
       setActionError(language === 'AZ' ? 'Zəhmət olmasa bütün sahələri doldurun.' : 'Please fill all fields.');
       return;
     }
@@ -349,17 +361,25 @@ export default function TeacherPanel({
     try {
       setActionError('');
       setActionSuccess('');
-      // Auto-assign to current teacher email
-      const newSyll = await onAddSyllabus(syllProgramId, syllCode, syllName, syllContent, syllCredits, currentUser.email);
+
+      await onUpdateSyllabus(selectedSyllabusIdForAdd, {
+        name: syllName,
+        code: syllCode,
+        content: syllContent,
+        credits: syllCredits,
+        teacherEmail: currentUser.email,
+        teacherEmails: [currentUser.email],
+        updateComment: language === 'AZ' ? 'Müəllim tərəfindən sillabus daxil edildi' : 'Syllabus content submitted by teacher'
+      });
       
       // Auto-upload manual syllabus to reference docs
-      if (newSyll && newSyll.id && onAddReferenceDoc) {
+      if (onAddReferenceDoc) {
         try {
           await onAddReferenceDoc(
             syllName,
             syllContent,
             'syllabus',
-            newSyll.id,
+            selectedSyllabusIdForAdd,
             `${(syllContent.length / 1024).toFixed(1)} KB`
           );
         } catch (docErr) {
@@ -372,6 +392,7 @@ export default function TeacherPanel({
       setSyllCode('');
       setSyllName('');
       setSyllContent('');
+      setSelectedSyllabusIdForAdd('');
       setSyllCredits(6);
     } catch (err: any) {
       setActionError(err.message || 'Error adding syllabus');
@@ -385,6 +406,9 @@ export default function TeacherPanel({
     setEditSyllContent(syll.content);
     setEditSyllCredits(syll.credits || 6);
     setEditSyllComment('');
+    setEditSyllDescription(syll.description || '');
+    setEditSyllTopics(syll.topics ? syll.topics.join('\n') : '');
+    setEditSyllFiles(syll.syllabusFiles ? syll.syllabusFiles.join(', ') : '');
     setIsEditingSyll(true);
   };
 
@@ -395,11 +419,25 @@ export default function TeacherPanel({
     try {
       setActionError('');
       setActionSuccess('');
+
+      const parsedTopics = editSyllTopics
+        .split('\n')
+        .map(t => t.trim())
+        .filter(t => t.length > 0);
+
+      const parsedFiles = editSyllFiles
+        .split(',')
+        .map(f => f.trim())
+        .filter(f => f.length > 0);
+
       await onUpdateSyllabus(selectedSyll.id, {
         name: editSyllName,
         code: editSyllCode,
         content: editSyllContent,
         credits: editSyllCredits,
+        description: editSyllDescription,
+        topics: parsedTopics,
+        syllabusFiles: parsedFiles,
         updateComment: editSyllComment || (language === 'AZ' ? 'Müəllim tərəfindən yeniləndi.' : 'Updated by teacher.')
       });
 
@@ -578,6 +616,11 @@ export default function TeacherPanel({
         >
           <Database className="w-4 h-4 text-emerald-600" />
           {language === 'AZ' ? 'Referans Sənədlər' : 'Reference Documents'}
+          {teacherRefDocs.length > 0 && (
+            <span className="w-5 h-5 flex items-center justify-center bg-teal-600 text-white rounded-full text-[10px] font-black">
+              {teacherRefDocs.length}
+            </span>
+          )}
           {activeTab === 'references' && <motion.div layoutId="teacherTabUnderline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-teal-800" />}
         </button>
       </div>
@@ -742,44 +785,45 @@ export default function TeacherPanel({
                           <span className="px-2 py-0.5 bg-teal-50 text-teal-800 border border-teal-200 rounded text-[10px] font-extrabold uppercase tracking-wide">
                             {language === 'AZ' ? 'Təhlil Olunmuş Fənn Sillabusu' : 'Parsed Subject Syllabus'}
                           </span>
-                          <h4 className="font-bold text-slate-800 text-sm mt-1">{parsedResult.name}</h4>
                         </div>
                         <span className="text-[10px] text-slate-400 italic">{language === 'AZ' ? 'Fayl:' : 'File:'} {parsedDocName}</span>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                        {/* Summary */}
-                        <div className="space-y-1">
-                          <h5 className="font-bold text-slate-700 uppercase tracking-wide text-[10px]">{language === 'AZ' ? 'Ümumi Məcmuə (Xülasə)' : 'General Summary'}</h5>
-                          <p className="text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100 max-h-[140px] overflow-y-auto whitespace-pre-wrap">
-                            {parsedResult.summary}
-                          </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-left">
+                        {/* Left Column: Code and Name */}
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'FƏNN KODU' : 'COURSE CODE'}</label>
+                            <input
+                              type="text"
+                              value={parsedResult.suggestedCode || ''}
+                              onChange={e => setParsedResult(prev => prev ? { ...prev, suggestedCode: e.target.value } : null)}
+                              placeholder="INF-101"
+                              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-semibold"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'FƏNNİN ADI' : 'SUBJECT NAME'}</label>
+                            <input
+                              type="text"
+                              value={parsedResult.name}
+                              onChange={e => setParsedResult(prev => prev ? { ...prev, name: e.target.value } : null)}
+                              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-semibold"
+                              required
+                            />
+                          </div>
                         </div>
 
-                        {/* Targets & Keywords */}
-                        <div className="space-y-3">
-                          <div className="space-y-1">
-                            <h5 className="font-bold text-slate-700 uppercase tracking-wide text-[10px]">{language === 'AZ' ? 'Çıxarılan Hədəflər' : 'Extracted Targets'}</h5>
-                            <ul className="space-y-1 max-h-[80px] overflow-y-auto">
-                              {parsedResult.targets.map((t, idx) => (
-                                <li key={idx} className="text-slate-600 leading-normal flex items-start gap-1 font-sans">
-                                  <span className="text-teal-700 font-bold shrink-0">•</span>
-                                  <span>{t}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-
-                          <div className="space-y-1">
-                            <h5 className="font-bold text-slate-700 uppercase tracking-wide text-[10px]">{language === 'AZ' ? 'Əsas Mövzular' : 'Core Topics'}</h5>
-                            <div className="flex flex-wrap gap-1.5">
-                              {parsedResult.keywords.map((k, idx) => (
-                                <span key={idx} className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] font-medium border border-slate-200">
-                                  {k}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
+                        {/* Right Column: Content/Summary */}
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'FƏNNİN MƏZMUNU / SİLLABUS XÜLASƏSİ' : 'SYLLABUS CONTENT / SUMMARY'}</label>
+                          <textarea
+                            value={parsedResult.summary}
+                            onChange={e => setParsedResult(prev => prev ? { ...prev, summary: e.target.value } : null)}
+                            rows={5}
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-semibold"
+                            required
+                          />
                         </div>
                       </div>
 
@@ -839,24 +883,53 @@ export default function TeacherPanel({
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNN KODU' : 'COURSE CODE'}</label>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNN SEÇİN *' : 'SELECT SUBJECT *'}</label>
+                      <select
+                        value={selectedSyllabusIdForAdd}
+                        onChange={e => {
+                          const sId = e.target.value;
+                          setSelectedSyllabusIdForAdd(sId);
+                          const found = (syllabi || []).find(s => s.id === sId);
+                          if (found) {
+                            setSyllCode(found.code);
+                            setSyllName(found.name);
+                            setSyllCredits(found.credits || 6);
+                          } else {
+                            setSyllCode('');
+                            setSyllName('');
+                          }
+                        }}
+                        className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-bold"
+                        required
+                      >
+                        <option value="">{language === 'AZ' ? '-- Fənn Seçin --' : '-- Select Subject --'}</option>
+                        {(syllabi || [])
+                          .filter(s => s.programId === syllProgramId && !s.archived)
+                          .map(s => (
+                            <option key={s.id} value={s.id}>{s.code} — {s.name}</option>
+                          ))
+                        }
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNN KODU (OXUNMA)' : 'COURSE CODE (READONLY)'}</label>
                       <input
                         type="text"
                         value={syllCode}
-                        onChange={e => setSyllCode(e.target.value)}
-                        placeholder={language === 'AZ' ? 'Məs. INF-401' : 'E.g. INF-401'}
-                        className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                        readOnly
+                        placeholder={language === 'AZ' ? 'Siyahıdan seçin' : 'Select from list'}
+                        className="w-full px-3 py-2 bg-slate-100 rounded-xl border border-slate-200 text-xs focus:outline-none cursor-not-allowed font-semibold text-slate-500"
                         required
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNNİN ADI' : 'SUBJECT NAME'}</label>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNNİN ADI (OXUNMA)' : 'SUBJECT NAME (READONLY)'}</label>
                       <input
                         type="text"
                         value={syllName}
-                        onChange={e => setSyllName(e.target.value)}
-                        placeholder={language === 'AZ' ? 'Məs. Rəqəmsal Pedaqogika' : 'E.g. Digital Pedagogy'}
-                        className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                        readOnly
+                        placeholder={language === 'AZ' ? 'Siyahıdan seçin' : 'Select from list'}
+                        className="w-full px-3 py-2 bg-slate-100 rounded-xl border border-slate-200 text-xs focus:outline-none cursor-not-allowed font-semibold text-slate-500"
                         required
                       />
                     </div>
@@ -927,71 +1000,93 @@ export default function TeacherPanel({
                 return (
                   <div 
                     key={prog.id}
-                    className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm shadow-slate-900/5 transition-all relative overflow-hidden"
+                    className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden hover:border-emerald-100 hover:shadow-md transition-all flex flex-col h-full justify-between relative"
                   >
                     {/* Upper decorative border for programs with teacher syllabi */}
                     {mySyllabiInThisProg.length > 0 && (
-                      <div className="absolute top-0 left-0 right-0 h-1.5 bg-teal-600" />
+                      <div className="absolute top-0 left-0 right-0 h-1 bg-teal-600" />
                     )}
 
-                    <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 pb-4 border-b border-slate-100">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="px-2.5 py-1 bg-teal-50 text-teal-800 rounded-lg text-[10px] font-extrabold border border-teal-200">
-                            {prog.version || 'v1.0'}
-                          </span>
-                          <span className="px-2.5 py-1 bg-slate-50 text-slate-700 rounded-lg text-[10px] font-semibold border border-slate-200">
-                            {prog.status || 'Güncəl'}
-                          </span>
-                          {mySyllabiInThisProg.length > 0 && (
-                            <span className="px-2.5 py-1 bg-emerald-50 text-emerald-800 rounded-lg text-[10px] font-extrabold border border-emerald-200 flex items-center gap-1">
-                              <UserCheck className="w-3 h-3" />
-                              {language === 'AZ' ? 'Kafedramızın Fənni Var' : 'Has My Subject'}
-                            </span>
-                          )}
+                    {/* Header Top content */}
+                    <div className="p-6 flex-1 flex flex-col justify-between">
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between gap-2 cursor-pointer" onClick={() => toggleProgramExpand(prog.id)}>
+                          <h3 className="font-bold text-slate-800 text-sm md:text-base hover:text-emerald-800 transition-colors leading-snug">{prog.name}</h3>
+                          <div className="shrink-0 flex items-center gap-1">
+                            {prog.status === 'Yenilənib' || mySyllabiInThisProg.length > 0 ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                <Sparkles className="w-2.5 h-2.5 text-amber-500" />
+                                {language === 'AZ' ? 'Fənnim Var' : 'My Course'}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                                {language === 'AZ' ? 'Normal' : 'Normal'}
+                              </span>
+                            )}
+                          </div>
                         </div>
-
-                        <h3 className="text-lg font-black text-slate-900 tracking-tight">{prog.name}</h3>
-                        <p className="text-xs text-slate-500 leading-relaxed font-normal">{prog.description}</p>
+                        {/* Clamped description with exact line clamp and height */}
+                        <p className="text-xs text-slate-500 leading-relaxed line-clamp-2 h-8 text-ellipsis overflow-hidden font-normal" title={prog.description}>
+                          {prog.description}
+                        </p>
                       </div>
 
-                      <div className="flex items-center gap-3 shrink-0">
-                        <div className="text-right">
-                          <p className="text-[10px] text-slate-400 uppercase font-black tracking-wider">{language === 'AZ' ? 'CƏM KREDİT' : 'TOTAL CREDITS'}</p>
-                          <p className="text-lg font-black text-slate-800">{prog.totalCredits || 240} <span className="text-xs text-slate-400 font-bold">ECTS</span></p>
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-4 border-t border-slate-100 text-[11px] font-mono text-slate-400 mt-4">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-bold border border-emerald-100">
+                            {language === 'AZ' ? 'Fənn: ' : 'Subjects: '}{progSyllabi.length}
+                          </span>
+                          <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-800 font-bold border border-blue-100">
+                            {prog.totalCredits || 240} ECTS
+                          </span>
                         </div>
-                        <button
-                          onClick={() => toggleProgramExpand(prog.id)}
-                          className="p-2 bg-slate-50 hover:bg-slate-100 border border-slate-100 text-slate-600 rounded-xl transition-all cursor-pointer"
-                        >
-                          <ChevronDown className={`w-4 h-4 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <span>V: <strong className="text-slate-700">{prog.version || '1.0'}</strong></span>
+                          <span>{language === 'AZ' ? 'Yenilənmə: ' : 'Updated: '}<strong className="text-slate-700">{prog.lastUpdated || '04.07.2026'}</strong></span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleProgramExpand(prog.id);
+                            }}
+                            className="ml-2 p-1.5 rounded-xl hover:bg-slate-200 text-slate-500 hover:text-slate-800 transition-all flex items-center justify-center cursor-pointer gap-1"
+                            title={language === 'AZ' ? 'Fənləri göstər/gizlə' : 'Show/hide subjects'}
+                          >
+                            <span className="text-[10px] text-slate-400 font-semibold">{language === 'AZ' ? 'Sillabuslar' : 'Syllabi'}</span>
+                            {isExpanded ? (
+                              <ChevronDown className="w-4 h-4 text-emerald-800" />
+                            ) : (
+                              <ChevronRight className="w-4 h-4 text-slate-400" />
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Syllabi List Inside Program */}
-                    <AnimatePresence>
+                    {/* Collapsible Syllabi List */}
+                    <AnimatePresence initial={false}>
                       {isExpanded && (
                         <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          className="overflow-hidden mt-4"
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden bg-white border-t border-slate-100 w-full"
                         >
-                          <div className="space-y-3">
-                            <span className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                          <div className="p-6 space-y-4">
+                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
                               {language === 'AZ' ? `FƏNLƏR VƏ SİLLABUSLAR (${progSyllabi.length})` : `SUBJECTS & SYLLABI (${progSyllabi.length})`}
-                            </span>
+                            </h4>
 
                             {progSyllabi.length === 0 ? (
-                              <p className="text-xs text-slate-400 italic py-2">{language === 'AZ' ? 'Hələ ki fənn əlavə edilməyib.' : 'No courses added yet.'}</p>
+                              <p className="text-xs text-slate-400 italic">{language === 'AZ' ? 'Hələ ki fənn əlavə edilməyib.' : 'No courses added yet.'}</p>
                             ) : (
                               <div className="space-y-2.5">
                                 {progSyllabi.map(syll => {
                                   const curEmail = currentUser?.email?.toLowerCase().trim();
                                   const isPrimary = syll.teacherEmail ? syll.teacherEmail.toLowerCase().trim() === curEmail : false;
                                   const isCo = syll.teacherEmails ? syll.teacherEmails.some(email => email.toLowerCase().trim() === curEmail) : false;
-                                  const isMine = isPrimary || isCo;
+                                  const isMine = isActualAdmin || isPrimary || isCo;
 
                                   return (
                                     <div 
@@ -1062,7 +1157,7 @@ export default function TeacherPanel({
                                           onClick={() => handleOpenEditSyllabus(syll)}
                                           className={`px-3.5 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                                             isMine 
-                                              ? 'bg-teal-850 hover:bg-teal-950 text-white' 
+                                              ? 'bg-teal-800 hover:bg-teal-950 text-white' 
                                               : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200'
                                           }`}
                                         >
@@ -1477,7 +1572,7 @@ export default function TeacherPanel({
                     <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-100">
                       <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">{language === 'AZ' ? 'TƏKLİF OLUNAN STRATEJİ HƏDƏFLƏR' : 'PROPOSED STRATEGIC TARGETS'}</h4>
                       <ul className="space-y-1.5">
-                        {aiResult.strategicGoals.map((g, idx) => (
+                        {(aiResult.strategicGoals || []).map((g, idx) => (
                           <li key={idx} className="text-xs text-slate-600 flex items-start gap-1 font-sans">
                             <span className="text-teal-700 font-bold shrink-0">•</span>
                             <span>{g}</span>
@@ -1523,7 +1618,7 @@ export default function TeacherPanel({
                           setActionError(err.message || 'Error applying reform');
                         }
                       }}
-                      className="w-full py-2.5 bg-teal-850 hover:bg-teal-950 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                      className="w-full py-2.5 bg-teal-800 hover:bg-teal-950 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
                     >
                       <Check className="w-4 h-4 text-emerald-400" />
                       {language === 'AZ' ? 'Məlumatları Sillabusa Köçür və Tətbiq Et' : 'Apply and Save Reform to Syllabus'}
@@ -1599,82 +1694,175 @@ export default function TeacherPanel({
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {teacherRefDocs.map((doc) => {
-                const programName = doc.associatedId ? programs.find(p => p.id === doc.associatedId)?.name : null;
-                const syllabusName = doc.associatedId ? syllabi.find(s => s.id === doc.associatedId)?.name : null;
-                const associatedName = programName || syllabusName;
+            (() => {
+              // 1. General Docs: doc.type === 'general' OR doc.associatedId is empty/not found in programs or syllabi
+              const generalDocs = teacherRefDocs.filter(doc => {
+                if (doc.type === 'general' || !doc.associatedId) return true;
+                const isProgId = programs.some(p => p.id === doc.associatedId);
+                const isSyllId = syllabi.some(s => s.id === doc.associatedId);
+                return !isProgId && !isSyllId;
+              });
+
+              // 2. Program-related
+              const programsWithDocs = myPrograms.map(prog => {
+                const progDocs = teacherRefDocs.filter(doc => doc.type === 'program' && doc.associatedId === prog.id);
+                const progSyllabi = syllabi.filter(s => s.programId === prog.id);
+                
+                const syllabiWithDocs = progSyllabi.map(syll => {
+                  const syllDocs = teacherRefDocs.filter(doc => doc.type === 'syllabus' && doc.associatedId === syll.id);
+                  return {
+                    syllabus: syll,
+                    docs: syllDocs
+                  };
+                }).filter(item => item.docs.length > 0);
+                
+                return {
+                  program: prog,
+                  progDocs,
+                  syllabiWithDocs,
+                  totalDocsCount: progDocs.length + syllabiWithDocs.reduce((acc, curr) => acc + curr.docs.length, 0)
+                };
+              }).filter(item => item.totalDocsCount > 0);
+
+              const renderDocCard = (doc: ReferenceDocument) => {
                 return (
                   <div 
                     key={doc.id} 
                     onClick={() => setSelectedRefDoc(doc)}
-                    className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-4 cursor-pointer hover:border-emerald-200 group"
+                    className="bg-white p-4 rounded-xl border border-slate-150 shadow-sm hover:shadow-md transition-all flex items-start justify-between gap-3 cursor-pointer hover:border-emerald-200 group text-left"
                   >
-                    <div className="space-y-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2.5">
-                          <div className="p-2 bg-emerald-50 rounded-xl text-emerald-800 border border-emerald-100 group-hover:bg-emerald-100/70 transition-colors">
-                            <FileText className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-slate-800 text-xs md:text-sm line-clamp-1 group-hover:text-emerald-900 transition-colors">{doc.name}</h4>
-                            <p className="text-[10px] text-slate-400 font-mono">{doc.fileSize || '0 KB'} • {new Date(doc.uploadedAt).toLocaleDateString()}</p>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation(); // Stop opening view modal
-                            setDeleteConfirm({
-                              name: doc.name,
-                              onConfirm: async () => {
-                                if (onDeleteReferenceDoc) {
-                                  await onDeleteReferenceDoc(doc.id);
-                                  setActionSuccess(language === 'AZ' ? 'Uğurla silindi!' : 'Successfully deleted!');
-                                  setTimeout(() => setActionSuccess(''), 3000);
-                                }
-                              }
-                            });
-                          }}
-                          className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg transition-all cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="p-2 bg-emerald-50 text-emerald-800 rounded-lg border border-emerald-100 group-hover:bg-emerald-100 transition-all flex-shrink-0">
+                        <FileText className="w-4 h-4" />
                       </div>
-
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold border ${doc.type === 'program' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : doc.type === 'syllabus' ? 'bg-cyan-50 text-cyan-700 border-cyan-100' : 'bg-slate-50 text-slate-700 border-slate-200'}`}>
-                          {doc.type === 'program' ? (language === 'AZ' ? 'İxtisas Proqramı Standartı' : 'Specialty Curriculum Standard') : doc.type === 'syllabus' ? (language === 'AZ' ? 'Sillabus Təlimatı' : 'Syllabus Guide') : (language === 'AZ' ? 'Ümumi Qaydalar' : 'General Rules')}
-                        </span>
-                        {associatedName && (
-                          <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 text-[9px] font-medium max-w-[200px] truncate">
-                            {associatedName}
-                          </span>
+                      <div className="min-w-0 flex-1">
+                        <h5 className="font-extrabold text-slate-800 text-xs md:text-sm line-clamp-1 group-hover:text-emerald-900 transition-colors">
+                          {doc.name}
+                        </h5>
+                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          {doc.fileSize || '0 KB'} • {new Date(doc.uploadedAt).toLocaleDateString()}
+                        </p>
+                        {doc.content && (
+                          <p className="text-[10px] text-slate-450 line-clamp-2 mt-1.5 leading-normal bg-slate-50 p-2 rounded-lg border border-slate-100/60 font-sans">
+                            {doc.content}
+                          </p>
                         )}
                       </div>
-
-                      <div className="bg-slate-50/50 p-3 rounded-xl border border-slate-100 text-[11px] text-slate-600 line-clamp-3 leading-relaxed font-mono whitespace-pre-wrap">
-                        {doc.content}
-                      </div>
                     </div>
-
-                    <div className="pt-2 border-t border-slate-50 flex justify-end">
+                    {onDeleteReferenceDoc && (doc.type !== 'program' || isActualAdmin) && (
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSelectedRefDoc(doc);
+                          setDeleteConfirm({
+                            name: doc.name,
+                            onConfirm: async () => {
+                              await onDeleteReferenceDoc(doc.id);
+                              setActionSuccess(language === 'AZ' ? 'Uğurla silindi!' : 'Successfully deleted!');
+                              setTimeout(() => setActionSuccess(''), 3000);
+                            }
+                          });
                         }}
-                        className="text-xs font-bold text-emerald-800 hover:text-emerald-950 flex items-center gap-1 transition-colors cursor-pointer"
+                        className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg transition-all flex-shrink-0 cursor-pointer"
                       >
-                        <Search className="w-3.5 h-3.5" />
-                        {language === 'AZ' ? 'Tam mətnə bax' : 'View full text'}
+                        <Trash2 className="w-4 h-4" />
                       </button>
-                    </div>
+                    )}
                   </div>
                 );
-              })}
-            </div>
+              };
+
+              return (
+                <div className="space-y-6">
+                  {/* Category 1: General Docs */}
+                  {generalDocs.length > 0 && (
+                    <div className="bg-slate-50/50 rounded-2xl border border-slate-200/50 p-5 space-y-3.5">
+                      <div className="flex items-center gap-2 pb-2 border-b border-slate-200">
+                        <Database className="w-4 h-4 text-slate-500" />
+                        <h3 className="text-xs md:text-sm font-black text-slate-700 uppercase tracking-wider">
+                          {language === 'AZ' ? 'Ümumi Qaydalar və Təlimatlar' : 'General Rules & Handbooks'}
+                        </h3>
+                        <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-full text-[10px] font-bold font-mono">
+                          {generalDocs.length}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {generalDocs.map(renderDocCard)}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Category 2: Programs and nested Syllabi */}
+                  {programsWithDocs.length > 0 && (
+                    <div className="space-y-6">
+                      {programsWithDocs.map(({ program, progDocs, syllabiWithDocs, totalDocsCount }) => (
+                        <div 
+                          key={program.id}
+                          className="bg-white rounded-3xl border border-slate-150 p-6 shadow-sm space-y-4"
+                        >
+                          {/* Program Header Section */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-slate-100">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-emerald-700/10 text-emerald-800 rounded-xl">
+                                <Layers className="w-5 h-5" />
+                              </div>
+                              <div className="text-left">
+                                <h4 className="font-extrabold text-slate-800 text-sm md:text-base leading-tight">
+                                  {program.name}
+                                </h4>
+                                <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                  {language === 'AZ' ? 'Kod:' : 'Code:'} <strong className="font-semibold text-slate-600">{program.id}</strong> • {program.totalCredits || 0} ECTS
+                                </p>
+                              </div>
+                            </div>
+                            <span className="self-start sm:self-center px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-[10px] font-bold uppercase tracking-wider">
+                              {totalDocsCount} {language === 'AZ' ? 'Sənəd' : 'Docs'}
+                            </span>
+                          </div>
+
+                          {/* Nested Program Standard Documents */}
+                          {progDocs.length > 0 && (
+                            <div className="space-y-2">
+                              <h5 className="text-[11px] font-black text-indigo-800 uppercase tracking-widest pl-1 text-left">
+                                {language === 'AZ' ? '• İXTİSAS PROQRAMI STANDARTLARI' : '• SPECIALTY PROGRAM STANDARDS'}
+                              </h5>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {progDocs.map(renderDocCard)}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Nested Syllabus Guidelines */}
+                          {syllabiWithDocs.length > 0 && (
+                            <div className="space-y-3.5 pt-2">
+                              <h5 className="text-[11px] font-black text-cyan-800 uppercase tracking-widest pl-1 text-left">
+                                {language === 'AZ' ? '• SİLLABUS METODİKİ TƏLİMATLARI' : '• SYLLABUS GUIDELINES'}
+                              </h5>
+                              <div className="space-y-3 pl-3 border-l-2 border-emerald-100">
+                                {syllabiWithDocs.map(({ syllabus, docs }) => (
+                                  <div key={syllabus.id} className="space-y-2 text-left">
+                                    <div className="flex items-center gap-2 text-xs font-extrabold text-slate-600">
+                                      <BookOpen className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>{syllabus.name}</span>
+                                      <span className="font-mono text-[10px] font-normal bg-slate-100 px-1.5 py-0.5 rounded text-slate-500">
+                                        {syllabus.code}
+                                      </span>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      {docs.map(renderDocCard)}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()
           )}
 
           {/* Add Reference Document Drawer / Slide-over Modal */}
@@ -1733,7 +1921,7 @@ export default function TeacherPanel({
                           onChange={handleRefDocWordUpload}
                           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                         />
-                        <div className="w-10 h-10 bg-emerald-50 text-emerald-850 rounded-full flex items-center justify-center mx-auto">
+                        <div className="w-10 h-10 bg-emerald-50 text-emerald-800 rounded-full flex items-center justify-center mx-auto">
                           <FileUp className="w-5 h-5" />
                         </div>
                         <div className="space-y-1">
@@ -1759,7 +1947,9 @@ export default function TeacherPanel({
                           className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold focus:ring-2 focus:ring-emerald-500/20"
                         >
                           <option value="general">{language === 'AZ' ? 'Ümumi / Metodik Qaydalar' : 'General Guidelines'}</option>
-                          <option value="program">{language === 'AZ' ? 'İxtisas Proqramı Standartı' : 'Program Standard'}</option>
+                          {isActualAdmin && (
+                            <option value="program">{language === 'AZ' ? 'İxtisas Proqramı Standartı' : 'Program Standard'}</option>
+                          )}
                           <option value="syllabus">{language === 'AZ' ? 'Fənn Sillabus Təlimatı' : 'Subject Syllabus Guide'}</option>
                         </select>
                       </div>
@@ -1844,7 +2034,7 @@ export default function TeacherPanel({
                     : undefined
                 }
                 onDelete={
-                  onDeleteReferenceDoc
+                  onDeleteReferenceDoc && (selectedRefDoc.type !== 'program' || isActualAdmin)
                     ? () => {
                         setDeleteConfirm({
                           name: selectedRefDoc.name,
@@ -1864,109 +2054,155 @@ export default function TeacherPanel({
         </motion.div>
       )}
       <AnimatePresence>
-        {isEditingSyll && selectedSyll && (
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-3xl p-6 border border-slate-150 max-w-lg w-full shadow-2xl space-y-4"
-            >
-              <div className="flex justify-between items-start pb-2 border-b border-slate-100">
-                <div>
-                  <h3 className="font-extrabold text-slate-800 text-sm uppercase tracking-wider">{language === 'AZ' ? 'Sillabusu Redaktə Et' : 'Edit Syllabus'}</h3>
-                  <span className="text-[10px] text-slate-400 font-semibold">{selectedSyll.code} • {language === 'AZ' ? 'Müəllim tərəfindən idarə edilir' : 'Managed by teacher'}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsEditingSyll(false)}
-                  className="p-1.5 hover:bg-slate-50 border border-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
-                >
-                  <XCircle className="w-4 h-4" />
-                </button>
-              </div>
+        {isEditingSyll && selectedSyll && (() => {
+          const curEmail = currentUser?.email?.toLowerCase().trim();
+          const isPrimarySel = selectedSyll.teacherEmail ? selectedSyll.teacherEmail.toLowerCase().trim() === curEmail : false;
+          const isCoSel = selectedSyll.teacherEmails ? selectedSyll.teacherEmails.some(email => email.toLowerCase().trim() === curEmail) : false;
+          const isMineSelected = isActualAdmin || isPrimarySel || isCoSel;
 
-              <form onSubmit={handleUpdateSyllabusSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-3 text-xs">
+          return (
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-white rounded-3xl p-6 border border-slate-150 max-w-lg w-full shadow-2xl space-y-4"
+              >
+                <div className="flex justify-between items-start pb-2 border-b border-slate-100">
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'FƏNNİN ADI' : 'SUBJECT NAME'}</label>
-                    <input
-                      type="text"
-                      value={editSyllName}
-                      onChange={e => setEditSyllName(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-semibold text-slate-850"
-                      required
-                    />
+                    <h3 className="font-extrabold text-slate-800 text-sm uppercase tracking-wider">
+                      {isMineSelected 
+                        ? (language === 'AZ' ? 'Sillabusu Redaktə Et' : 'Edit Syllabus') 
+                        : (language === 'AZ' ? 'Sillabusa Bax' : 'View Syllabus')}
+                    </h3>
+                    <span className="text-[10px] text-slate-400 font-semibold">
+                      {selectedSyll.code} • {isMineSelected ? (language === 'AZ' ? 'Müəllim tərəfindən idarə edilir' : 'Managed by teacher') : (language === 'AZ' ? 'Oxuma Rejimi' : 'Read-Only Mode')}
+                    </span>
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'KREDİT (ECTS)' : 'CREDITS (ECTS)'}</label>
-                    <input
-                      type="number"
-                      value={editSyllCredits}
-                      onChange={e => setEditSyllCredits(parseInt(e.target.value) || 6)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-semibold text-slate-850"
-                      min="1"
-                      max="30"
-                      required
-                    />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingSyll(false)}
+                    className="p-1.5 hover:bg-slate-50 border border-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                  >
+                    <XCircle className="w-4 h-4" />
+                  </button>
                 </div>
 
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'FƏNN KODU' : 'COURSE CODE'}</label>
-                  <input
-                    type="text"
-                    value={editSyllCode}
-                    onChange={e => setEditSyllCode(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-semibold text-slate-850"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'TƏDRİS MATERİALI VƏ SILLABUS MƏZMUNU' : 'CURRICULUM CONTENT & TOPICS'}</label>
-                  <textarea
-                    value={editSyllContent}
-                    onChange={e => setEditSyllContent(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-mono text-[11px] h-36 resize-y leading-relaxed text-slate-700"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'DƏYİŞİKLİK QEYDİ (LOG) *' : 'LOG DRAFT/COMMENT *'}</label>
-                  <input
-                    type="text"
-                    value={editSyllComment}
-                    onChange={e => setEditSyllComment(e.target.value)}
-                    placeholder={language === 'AZ' ? 'Məs. Riyaziyyat standartına əsasən bəzi fəsillər birləşdirildi.' : 'E.g. Topics restructured according to state guidelines.'}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 text-xs font-semibold"
-                    required
-                  />
-                </div>
-
-                {/* Display logs history list */}
-                {selectedSyll.updatesLog && selectedSyll.updatesLog.length > 0 && (
-                  <div className="space-y-1 pt-2 border-t border-slate-100">
-                    <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">{t('updatesHistory')}</span>
-                    <div className="max-h-[80px] overflow-y-auto space-y-1 text-[10px] text-slate-500 font-medium">
-                      {selectedSyll.updatesLog.map((log, lidx) => (
-                        <div key={lidx} className="flex items-start gap-1 p-1 bg-slate-50 rounded-lg border border-slate-100/50">
-                          <History className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
-                          <span>{log}</span>
-                        </div>
-                      ))}
+                <form onSubmit={handleUpdateSyllabusSubmit} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'FƏNNİN ADI' : 'SUBJECT NAME'}</label>
+                      <input
+                        type="text"
+                        value={editSyllName}
+                        onChange={e => setEditSyllName(e.target.value)}
+                        disabled={!isMineSelected}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-semibold text-slate-800 disabled:opacity-75"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'KREDİT (ECTS)' : 'CREDITS (ECTS)'}</label>
+                      <input
+                        type="number"
+                        value={editSyllCredits}
+                        onChange={e => setEditSyllCredits(parseInt(e.target.value) || 6)}
+                        disabled={!isMineSelected}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-semibold text-slate-800 disabled:opacity-75"
+                        min="1"
+                        max="30"
+                        required
+                      />
                     </div>
                   </div>
-                )}
 
-                <div className="flex justify-between items-center pt-2">
-                  {(() => {
-                    const curEmail = currentUser?.email?.toLowerCase().trim();
-                    const isPrimarySel = selectedSyll.teacherEmail ? selectedSyll.teacherEmail.toLowerCase().trim() === curEmail : false;
-                    const isCoSel = selectedSyll.teacherEmails ? selectedSyll.teacherEmails.some(email => email.toLowerCase().trim() === curEmail) : false;
-                    const isMineSelected = isPrimarySel || isCoSel;
-                    return isMineSelected ? (
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'FƏNN KODU' : 'COURSE CODE'}</label>
+                    <input
+                      type="text"
+                      value={editSyllCode}
+                      onChange={e => setEditSyllCode(e.target.value)}
+                      disabled={!isMineSelected}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-semibold text-slate-800 disabled:opacity-75"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'TƏDRİS MATERİALI VƏ SILLABUS MƏZMUNU' : 'CURRICULUM CONTENT & TOPICS'}</label>
+                    <textarea
+                      value={editSyllContent}
+                      onChange={e => setEditSyllContent(e.target.value)}
+                      disabled={!isMineSelected}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-mono text-[11px] h-36 resize-y leading-relaxed text-slate-700 disabled:opacity-75"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'FƏNNİN ƏTRAFLI TƏSVİRİ (DESCRIPTION)' : 'COURSE DESCRIPTION'}</label>
+                    <textarea
+                      value={editSyllDescription}
+                      onChange={e => setEditSyllDescription(e.target.value)}
+                      disabled={!isMineSelected}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 text-xs h-20 resize-y text-slate-700 disabled:opacity-75"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'HƏFTƏLİK MÖVZULAR (HƏR SƏTİRDƏ BİR MÖVZU)' : 'WEEKLY TOPICS (ONE PER LINE)'}</label>
+                    <textarea
+                      value={editSyllTopics}
+                      onChange={e => setEditSyllTopics(e.target.value)}
+                      disabled={!isMineSelected}
+                      placeholder={language === 'AZ' ? "Hefte 1: Giris\nHefte 2: Alqoritmler" : "Week 1: Introduction\nWeek 2: Algorithms"}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-mono text-[11px] h-24 resize-y leading-relaxed text-slate-700 disabled:opacity-75"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'SİLLABUS SƏNƏDLƏRİ (VERGÜLLƏ AYRILMIŞ LİNKLƏR)' : 'SYLLABUS DOCUMENTS (COMMA SEPARATED URLS)'}</label>
+                    <input
+                      type="text"
+                      value={editSyllFiles}
+                      onChange={e => setEditSyllFiles(e.target.value)}
+                      disabled={!isMineSelected}
+                      placeholder="https://example.com/syllabus.pdf"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 text-xs font-semibold text-slate-800 disabled:opacity-75"
+                    />
+                  </div>
+
+                  {isMineSelected && (
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-1">{language === 'AZ' ? 'DƏYİŞİKLİK QEYDİ (LOG) *' : 'LOG DRAFT/COMMENT *'}</label>
+                      <input
+                        type="text"
+                        value={editSyllComment}
+                        onChange={e => setEditSyllComment(e.target.value)}
+                        placeholder={language === 'AZ' ? 'Məs. Riyaziyyat standartına əsasən bəzi fəsillər birləşdirildi.' : 'E.g. Topics restructured according to state guidelines.'}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500/20 text-xs font-semibold"
+                        required
+                      />
+                    </div>
+                  )}
+
+                  {/* Display logs history list */}
+                  {selectedSyll.updatesLog && selectedSyll.updatesLog.length > 0 && (
+                    <div className="space-y-1 pt-2 border-t border-slate-100">
+                      <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">{t('updatesHistory')}</span>
+                      <div className="max-h-[80px] overflow-y-auto space-y-1 text-[10px] text-slate-500 font-medium">
+                        {selectedSyll.updatesLog.map((log, lidx) => (
+                          <div key={lidx} className="flex items-start gap-1 p-1 bg-slate-50 rounded-lg border border-slate-100/50">
+                            <History className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
+                            <span>{log}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between items-center pt-2">
+                    {isMineSelected && (
                       <button
                         type="button"
                         onClick={() => {
@@ -1985,28 +2221,30 @@ export default function TeacherPanel({
                         <Trash2 className="w-3.5 h-3.5" />
                         {language === 'AZ' ? 'Sil' : 'Delete'}
                       </button>
-                    ) : <div />;
-                  })()}
-                  <div className="flex gap-2 ml-auto">
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingSyll(false)}
-                      className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold rounded-xl text-xs transition-colors cursor-pointer"
-                    >
-                      {t('cancelBtn')}
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-5 py-2 bg-teal-850 hover:bg-teal-950 text-white font-black rounded-xl text-xs transition-colors shadow-md cursor-pointer"
-                    >
-                      {t('saveBtn')}
-                    </button>
+                    )}
+                    <div className="flex gap-2 ml-auto">
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingSyll(false)}
+                        className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                      >
+                        {t('cancelBtn')}
+                      </button>
+                      {isMineSelected && (
+                        <button
+                          type="submit"
+                          className="px-5 py-2 bg-teal-800 hover:bg-teal-950 text-white font-black rounded-xl text-xs transition-colors shadow-md cursor-pointer"
+                        >
+                          {t('saveBtn')}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
+                </form>
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* --- MODAL 2: MANUAL EVALUATION MODAL --- */}
@@ -2080,7 +2318,7 @@ export default function TeacherPanel({
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-teal-850 hover:bg-teal-950 text-white font-black rounded-xl text-xs transition-colors shadow-md"
+                    className="px-5 py-2 bg-teal-800 hover:bg-teal-950 text-white font-black rounded-xl text-xs transition-colors shadow-md"
                   >
                     {language === 'AZ' ? 'Təsdiqlə və Saxla' : 'Confirm and Save'}
                   </button>

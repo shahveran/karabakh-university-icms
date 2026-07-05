@@ -1,19 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
-  DatabaseState, User, Program, Syllabus, SuggestionCase, Notification, AIAnalysisResponse 
+  DatabaseState, User, Program, Syllabus, SuggestionCase, Notification, AIAnalysisResponse, ReferenceDocument 
 } from './types';
 import StudentPanel from './components/StudentPanel';
 import EnterprisePanel from './components/EnterprisePanel';
 import ProgramHeadPanel from './components/ProgramHeadPanel';
 import TeacherPanel from './components/TeacherPanel';
 import AdminPanel from './components/AdminPanel';
+import ObserverPanel from './components/ObserverPanel';
 import Logo from './components/Logo';
 import { useLanguage } from './LanguageContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Bell, LogOut, User as UserIcon, GraduationCap, Building2, 
   MapPin, Sparkles, BookOpen, Layers, CheckCircle2, X, Trash2, Landmark, ChevronRight,
-  Shield
+  Shield, Eye
 } from 'lucide-react';
 
 // Global fetch interceptor to append authorization token and handle 401 Unauthorized
@@ -41,7 +42,7 @@ window.fetch = async (input, init) => {
   } catch (e) {
     console.error('Error in fetch interceptor:', e);
   }
-  const response = await originalFetch(input, init);
+  const response = await originalFetch.call(window, input, init);
   if (response.status === 401) {
     localStorage.removeItem('qarabag_user');
     window.dispatchEvent(new Event('qarabag_unauthorized'));
@@ -52,9 +53,10 @@ window.fetch = async (input, init) => {
 // Filter reference documents based on owner/assignment visibility rules
 function docsToFilter(docs: ReferenceDocument[], user: User | null, programs: Program[], syllabi: Syllabus[]): ReferenceDocument[] {
   if (!user) return [];
-  if (user.role === 'admin') return docs; // Admins can see everything
+  if (user.role === 'admin' || user.role === 'observer') return docs; // Admins and Observers can see everything
 
   const userEmail = user.email.toLowerCase().trim();
+  const isActualAdmin = userEmail === 'admin@qu.edu.az' || userEmail === 'admin@karabakh.edu.az';
 
   return docs.filter(doc => {
     // 1. The user who uploaded the document can always see it
@@ -62,29 +64,47 @@ function docsToFilter(docs: ReferenceDocument[], user: User | null, programs: Pr
       return true;
     }
 
-    // 2. If it's a program-associated document, check if the user is authorized for the Program
-    if (doc.associatedId) {
-      const associatedProgram = programs.find(p => p.id === doc.associatedId);
-      if (associatedProgram) {
-        const isCreator = associatedProgram.createdBy && associatedProgram.createdBy.toLowerCase().trim() === userEmail;
-        const isAllowedHead = associatedProgram.allowedHeads && associatedProgram.allowedHeads.some(email => email.toLowerCase().trim() === userEmail);
-        if (isCreator || isAllowedHead) return true;
+    // 2. Simulated/Actual admins can see everything
+    if (isActualAdmin) {
+      return true;
+    }
+
+    // 3. General documents are visible to all teachers and heads
+    if (doc.type === 'general' || !doc.associatedId) {
+      return user.role === 'teacher' || user.role === 'head';
+    }
+
+    // 4. If it's a program-associated document, check if the user is authorized for the Program
+    const associatedProgram = programs.find(p => p.id === doc.associatedId);
+    if (associatedProgram) {
+      const isCreator = associatedProgram.createdBy && associatedProgram.createdBy.toLowerCase().trim() === userEmail;
+      const isAllowedHead = associatedProgram.allowedHeads && associatedProgram.allowedHeads.some(email => email.toLowerCase().trim() === userEmail);
+      if (isCreator || isAllowedHead) return true;
+
+      // If user is a teacher, check if they teach any syllabus under this program
+      if (user.role === 'teacher') {
+        const teachesSyllabus = syllabi.some(s => 
+          s.programId === associatedProgram.id && 
+          ((s.teacherEmail && s.teacherEmail.toLowerCase().trim() === userEmail) ||
+           (s.teacherEmails && s.teacherEmails.some(email => email.toLowerCase().trim() === userEmail)))
+        );
+        if (teachesSyllabus) return true;
       }
+    }
 
-      // 3. If it's a syllabus-associated document, check if the user is the teacher or head of parent Program
-      const associatedSyllabus = syllabi.find(s => s.id === doc.associatedId);
-      if (associatedSyllabus) {
-        const isTeacher = (associatedSyllabus.teacherEmail && associatedSyllabus.teacherEmail.toLowerCase().trim() === userEmail) ||
-                          (associatedSyllabus.teacherEmails && associatedSyllabus.teacherEmails.some(email => email.toLowerCase().trim() === userEmail));
-        if (isTeacher) return true;
+    // 5. If it's a syllabus-associated document, check if the user is the teacher or head of parent Program
+    const associatedSyllabus = syllabi.find(s => s.id === doc.associatedId);
+    if (associatedSyllabus) {
+      const isTeacher = (associatedSyllabus.teacherEmail && associatedSyllabus.teacherEmail.toLowerCase().trim() === userEmail) ||
+                        (associatedSyllabus.teacherEmails && associatedSyllabus.teacherEmails.some(email => email.toLowerCase().trim() === userEmail));
+      if (isTeacher) return true;
 
-        // Head of the program associated with this syllabus
-        const parentProgram = programs.find(p => p.id === associatedSyllabus.programId);
-        if (parentProgram) {
-          const isCreator = parentProgram.createdBy && parentProgram.createdBy.toLowerCase().trim() === userEmail;
-          const isAllowedHead = parentProgram.allowedHeads && parentProgram.allowedHeads.some(email => email.toLowerCase().trim() === userEmail);
-          if (isCreator || isAllowedHead) return true;
-        }
+      // Head of the program associated with this syllabus
+      const parentProgram = programs.find(p => p.id === associatedSyllabus.programId);
+      if (parentProgram) {
+        const isCreator = parentProgram.createdBy && parentProgram.createdBy.toLowerCase().trim() === userEmail;
+        const isAllowedHead = parentProgram.allowedHeads && parentProgram.allowedHeads.some(email => email.toLowerCase().trim() === userEmail);
+        if (isCreator || isAllowedHead) return true;
       }
     }
 
@@ -108,7 +128,18 @@ export default function App() {
 
   // UI state for notifications menu
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
-  const [adminActiveRole, setAdminActiveRole] = useState<'admin' | 'head' | 'student' | 'enterprise' | 'teacher'>('admin');
+  const [adminActiveRole, setAdminActiveRole] = useState<'admin' | 'head' | 'student' | 'enterprise' | 'teacher' | 'observer'>(() => {
+    try {
+      const stored = localStorage.getItem('qarabag_user');
+      if (stored) {
+        const u = JSON.parse(stored);
+        if (['admin', 'observer'].includes(u.role)) {
+          return u.role;
+        }
+      }
+    } catch {}
+    return 'admin';
+  });
 
   // Manual custom login inputs
   const [loginEmail, setLoginEmail] = useState('');
@@ -120,11 +151,15 @@ export default function App() {
   const [isRegisterMode, setIsRegisterMode] = useState(false);
 
   // Fetch full state from backend
-  const fetchState = async () => {
+  // Scroll position is preserved so the page does not jump to top after actions
+  const fetchState = useCallback(async () => {
     if (!localStorage.getItem('qarabag_user')) {
       setLoading(false);
       return;
     }
+    // Save scroll position before state update
+    const scrollEl = document.querySelector('.panel-scroll-container') as HTMLElement | null;
+    const savedScrollTop = scrollEl ? scrollEl.scrollTop : window.scrollY;
     try {
       const res = await fetch('/api/state');
       if (res.status === 401) {
@@ -134,12 +169,29 @@ export default function App() {
       if (!res.ok) throw new Error(language === 'AZ' ? 'Dövlət məlumatları yüklənərkən xəta yarandı.' : 'Error loading app state data.');
       const data: DatabaseState = await res.json();
       setDbState(data);
+      // Restore scroll position after React re-renders
+      requestAnimationFrame(() => {
+        if (scrollEl) {
+          scrollEl.scrollTop = savedScrollTop;
+        } else {
+          window.scrollTo({ top: savedScrollTop, behavior: 'instant' as ScrollBehavior });
+        }
+      });
     } catch (err: any) {
       setError(err.message || (language === 'AZ' ? 'Server ilə əlaqə qurulmadı.' : 'Could not connect to the server.'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [language]);
+
+  // Scroll to top when active user session or active admin role changes (e.g. login/logout/role switch)
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+    const scrollEl = document.querySelector('.panel-scroll-container') as HTMLElement | null;
+    if (scrollEl) {
+      scrollEl.scrollTop = 0;
+    }
+  }, [currentUser, adminActiveRole]);
 
   // Listen for global unauthorized events
   useEffect(() => {
@@ -482,16 +534,18 @@ export default function App() {
   const unreadCount = userNotifications.filter(n => !n.read).length;
 
   // Determine dynamic simulated user role and model for Administrator simulation
-  const activeRoleToRender = currentUser ? (currentUser.role === 'admin' ? adminActiveRole : currentUser.role) : null;
+  const activeRoleToRender = currentUser ? (
+    (currentUser.role === 'admin' || currentUser.role === 'observer') ? adminActiveRole : currentUser.role
+  ) : null;
   
   // Custom user mapping for simulated views
   const currentUserToPass: User | null = currentUser ? (
-    currentUser.role === 'admin' && adminActiveRole !== 'admin' ? {
+    (currentUser.role === 'admin' || currentUser.role === 'observer') && adminActiveRole !== currentUser.role ? {
       ...currentUser,
-      role: adminActiveRole,
+      role: adminActiveRole as any,
       name: language === 'AZ' 
-        ? `Sistem Administratoru (${adminActiveRole === 'head' ? 'Proqram Rəhbəri' : adminActiveRole === 'teacher' ? 'Müəllim' : adminActiveRole === 'student' ? 'Tələbə' : 'Müəssisə'} Görünüşü)`
-        : `System Admin (${adminActiveRole === 'head' ? 'Program Head' : adminActiveRole === 'teacher' ? 'Teacher' : adminActiveRole === 'student' ? 'Student' : 'Enterprise'} View)`
+        ? `${currentUser.role === 'admin' ? 'Sistem Administratoru' : 'Münsif/İzləyici'} (${adminActiveRole === 'head' ? 'Proqram Rəhbəri' : adminActiveRole === 'teacher' ? 'Müəllim' : adminActiveRole === 'student' ? 'Tələbə' : adminActiveRole === 'enterprise' ? 'Müəssisə' : adminActiveRole === 'admin' ? 'Admin' : 'İzləyici'} Görünüşü)`
+        : `${currentUser.role === 'admin' ? 'System Admin' : 'Jury/Observer'} (${adminActiveRole === 'head' ? 'Program Head' : adminActiveRole === 'teacher' ? 'Teacher' : adminActiveRole === 'student' ? 'Student' : adminActiveRole === 'enterprise' ? 'Enterprise' : adminActiveRole === 'admin' ? 'Admin' : 'Observer'} View)`
     } : currentUser
   ) : null;
 
@@ -676,16 +730,18 @@ export default function App() {
       <main className="w-full px-4 md:px-6 flex-grow max-w-7xl mx-auto py-8" id="app-main-content">
         {currentUser ? (
           <div className="space-y-6">
-            {/* Administrator Role Control Hub */}
-            {currentUser.role === 'admin' && (
-              <div className="bg-gradient-to-r from-red-950 via-slate-900 to-red-950 text-white rounded-2xl p-3.5 shadow-xl border border-red-900/40 flex flex-col md:flex-row items-center justify-between gap-4">
+            {/* Administrator / Observer Role Control Hub */}
+            {(currentUser.role === 'admin' || currentUser.role === 'observer') && (
+              <div className={`bg-gradient-to-r ${currentUser.role === 'admin' ? 'from-red-950 via-slate-900 to-red-950 border-red-900/40' : 'from-indigo-950 via-slate-900 to-indigo-950 border-indigo-900/40'} text-white rounded-2xl p-3.5 shadow-xl border flex flex-col md:flex-row items-center justify-between gap-4`}>
                 <div className="flex items-center gap-3 shrink-0">
-                  <div className="p-2.5 bg-red-500/10 text-red-400 rounded-xl border border-red-500/20 shadow-inner">
+                  <div className={`p-2.5 rounded-xl border shadow-inner ${currentUser.role === 'admin' ? 'bg-red-500/10 text-red-400 border-red-500/20' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
                     <Shield className="w-5 h-5 animate-pulse" />
                   </div>
                   <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-red-400">
-                      {language === 'AZ' ? 'Sistem Administratoru' : 'System Administrator'}
+                    <h3 className={`text-xs font-bold uppercase tracking-wider ${currentUser.role === 'admin' ? 'text-red-400' : 'text-indigo-400'}`}>
+                      {currentUser.role === 'admin' 
+                        ? (language === 'AZ' ? 'Sistem Administratoru' : 'System Administrator')
+                        : (language === 'AZ' ? 'Münsif / Monitorinq Rejimi' : 'Jury / Showcase Mode')}
                     </h3>
                     <p className="text-[10px] text-slate-300 mt-0.5 whitespace-nowrap">
                       {language === 'AZ' ? 'Simulyasiya Paneli:' : 'Simulation Panel:'}
@@ -694,16 +750,30 @@ export default function App() {
                 </div>
                 
                 <div className="flex flex-nowrap overflow-x-auto gap-2 w-full md:w-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {currentUser.role === 'admin' && (
+                    <button
+                      onClick={() => setAdminActiveRole('admin')}
+                      className={`px-3 py-1.5 rounded-lg text-[10px] font-extrabold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                        adminActiveRole === 'admin'
+                          ? 'bg-red-600 text-white shadow-md shadow-red-600/30 border border-red-500'
+                          : 'bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10'
+                      }`}
+                    >
+                      <Shield className="w-3.5 h-3.5" />
+                      Admin Panel
+                    </button>
+                  )}
+
                   <button
-                    onClick={() => setAdminActiveRole('admin')}
+                    onClick={() => setAdminActiveRole('observer')}
                     className={`px-3 py-1.5 rounded-lg text-[10px] font-extrabold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
-                      adminActiveRole === 'admin'
-                        ? 'bg-red-600 text-white shadow-md shadow-red-600/30 border border-red-500'
+                      adminActiveRole === 'observer'
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 border border-indigo-500'
                         : 'bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10'
                     }`}
                   >
-                    <Shield className="w-3.5 h-3.5" />
-                    Admin Panel
+                    <Eye className="w-3.5 h-3.5" />
+                    {language === 'AZ' ? 'İzləyici Paneli' : 'Observer Panel'}
                   </button>
                   
                   <button
@@ -844,6 +914,17 @@ export default function App() {
                         onDeleteReferenceDoc={handleDeleteReferenceDoc}
                       />
                     )}
+
+                    {activeRoleToRender === 'observer' && (
+                      <ObserverPanel
+                        currentUser={currentUserToPass!}
+                        programs={dbState?.programs || []}
+                        syllabi={dbState?.syllabi || []}
+                        suggestions={dbState?.suggestions || []}
+                        users={dbState?.users || []}
+                        referenceDocs={visibleReferenceDocs}
+                      />
+                    )}
                   </motion.div>
                 </AnimatePresence>
               );
@@ -976,6 +1057,78 @@ export default function App() {
                     : t('loginBtn')}
               </button>
             </form>
+
+            {/* Quick Login / Demo Accounts Showcase */}
+            <div className="mt-5 pt-4 border-t border-slate-100 text-left">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 text-center">
+                {language === 'AZ' ? 'QS Reimagine Sürətli Giriş (Demo)' : 'QS Reimagine Quick Login (Demo)'}
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginEmail('munsif@qu.edu.az');
+                    setLoginPassword('123456');
+                    setIsRegisterMode(false);
+                  }}
+                  className="p-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-150 rounded-xl font-extrabold text-indigo-800 transition-all flex items-center gap-1.5 cursor-pointer text-left"
+                >
+                  <Eye className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <div>
+                    <p className="font-black leading-none">{language === 'AZ' ? 'Münsif (Jury)' : 'Jury / Observer'}</p>
+                    <p className="text-[8px] text-indigo-500 font-mono mt-0.5">munsif@qu.edu.az</p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginEmail('murad.mammadov@qu.edu.az');
+                    setLoginPassword('123456');
+                    setIsRegisterMode(false);
+                  }}
+                  className="p-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-150 rounded-xl font-extrabold text-emerald-800 transition-all flex items-center gap-1.5 cursor-pointer text-left"
+                >
+                  <UserIcon className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div>
+                    <p className="font-black leading-none">{language === 'AZ' ? 'Proqram Rəhbəri' : 'Program Head'}</p>
+                    <p className="text-[8px] text-emerald-500 font-mono mt-0.5">murad.mammadov</p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginEmail('tarana.mammadova@qu.edu.az');
+                    setLoginPassword('123456');
+                    setIsRegisterMode(false);
+                  }}
+                  className="p-2 bg-teal-50 hover:bg-teal-100 border border-teal-150 rounded-xl font-extrabold text-teal-800 transition-all flex items-center gap-1.5 cursor-pointer text-left"
+                >
+                  <BookOpen className="w-4 h-4 text-teal-600 shrink-0" />
+                  <div>
+                    <p className="font-black leading-none">{language === 'AZ' ? 'Müəllim' : 'Teacher'}</p>
+                    <p className="text-[8px] text-teal-500 font-mono mt-0.5">tarana.mammadova</p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginEmail('leyla.aliyeva@qu.edu.az');
+                    setLoginPassword('123456');
+                    setIsRegisterMode(false);
+                  }}
+                  className="p-2 bg-sky-50 hover:bg-sky-100 border border-sky-150 rounded-xl font-extrabold text-sky-800 transition-all flex items-center gap-1.5 cursor-pointer text-left"
+                >
+                  <GraduationCap className="w-4 h-4 text-sky-600 shrink-0" />
+                  <div>
+                    <p className="font-black leading-none">{language === 'AZ' ? 'Tələbə' : 'Student'}</p>
+                    <p className="text-[8px] text-sky-500 font-mono mt-0.5">leyla.aliyeva</p>
+                  </div>
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </main>
