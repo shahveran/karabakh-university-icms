@@ -84,22 +84,9 @@ export default function StudentPanel({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const [programSearch, setProgramSearch] = useState('');
-  const [syllabusSearch, setSyllabusSearch] = useState('');
 
-  // Filter programs based on search input
-  const filteredActivePrograms = activePrograms.filter(p => 
-    p.name.toLowerCase().includes(programSearch.toLowerCase()) ||
-    p.id.toLowerCase().includes(programSearch.toLowerCase())
-  );
-
-  // Filter syllabi based on selected program, archived status, and search input
-  const filteredSyllabi = syllabi.filter(s => 
-    s.programId === selectedProgramId && 
-    !s.archived &&
-    (s.name.toLowerCase().includes(syllabusSearch.toLowerCase()) || 
-     s.code.toLowerCase().includes(syllabusSearch.toLowerCase()))
-  );
+  // Filter syllabi based on selected program and ensure it's not archived
+  const filteredSyllabi = syllabi.filter(s => s.programId === selectedProgramId && !s.archived);
 
   // Filter suggestions submitted by this student
   const studentSuggestions = suggestions.filter(
@@ -257,15 +244,8 @@ export default function StudentPanel({
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
-                {language === 'AZ' ? 'Tədris Proqramı Seçin *' : 'Select Curriculum Program *'}
+                {language === 'AZ' ? 'Tədris Proqramı *' : 'Curriculum Program *'}
               </label>
-              <input
-                type="text"
-                value={programSearch}
-                onChange={e => setProgramSearch(e.target.value)}
-                placeholder={language === 'AZ' ? 'İxtisas proqramı axtar (məs: İbtidai sinif)...' : 'Search curriculum program (e.g. Primary)...'}
-                className="w-full px-4 py-2 rounded-xl border border-slate-200 mb-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-xs font-medium"
-              />
               <select
                 value={selectedProgramId}
                 onChange={e => {
@@ -274,9 +254,9 @@ export default function StudentPanel({
                 }}
                 className="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-xs transition-all bg-white text-slate-700 font-semibold cursor-pointer"
               >
-                {filteredActivePrograms.map(prog => (
+                {activePrograms.map(prog => (
                   <option key={prog.id} value={prog.id}>
-                    {prog.name}
+                    {prog.id} ({prog.totalCredits || 240} ECTS) — {prog.name}
                   </option>
                 ))}
               </select>
@@ -286,13 +266,6 @@ export default function StudentPanel({
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
                 {language === 'AZ' ? 'Əlaqəli Fənn (Sillabus)' : 'Related Course (Syllabus)'} <span className="text-slate-400 text-[10px] font-normal">({language === 'AZ' ? 'Könüllü' : 'Optional'})</span>
               </label>
-              <input
-                type="text"
-                value={syllabusSearch}
-                onChange={e => setSyllabusSearch(e.target.value)}
-                placeholder={language === 'AZ' ? 'Fənn axtar (məs: Pedaqogika)...' : 'Search course (e.g. Pedagogy)...'}
-                className="w-full px-4 py-2 rounded-xl border border-slate-200 mb-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-xs font-medium"
-              />
               <select
                 value={selectedSyllabusId}
                 onChange={e => setSelectedSyllabusId(e.target.value)}
@@ -301,7 +274,7 @@ export default function StudentPanel({
                 <option value="">{language === 'AZ' ? 'Fənn seçilməyib (Ümumi proqram rəyi)' : 'No subject chosen (General program review)'}</option>
                 {filteredSyllabi.map(syll => (
                   <option key={syll.id} value={syll.id}>
-                    {syll.code} ({syll.credits || 6} {language === 'AZ' ? 'Kredit' : 'ECTS'}) - {syll.name}
+                    {syll.code} ({syll.credits || 6} ECTS) — {syll.name}
                   </option>
                 ))}
               </select>
