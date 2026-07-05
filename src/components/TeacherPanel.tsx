@@ -92,6 +92,8 @@ export default function TeacherPanel({
 
   const [parsedRawText, setParsedRawText] = useState('');
   const [parsedHtml, setParsedHtml] = useState('');
+  const [programSearchForAdd, setProgramSearchForAdd] = useState('');
+  const [syllabusSearchForAdd, setSyllabusSearchForAdd] = useState('');
 
   // Syllabus Editing States
   const [selectedSyll, setSelectedSyll] = useState<Syllabus | null>(null);
@@ -833,15 +835,29 @@ export default function TeacherPanel({
                           <label className="block text-[10px] font-bold text-teal-950 uppercase tracking-wider">{language === 'AZ' ? 'AİD OLDUĞU İXTİSAS PROQRAMINI SEÇİN *' : 'SELECT THE CORRESPONDING SPECIALTY PROGRAM *'}</label>
                           <span className="text-[10px] text-slate-400">{language === 'AZ' ? 'Sillabusun daxil ediləcəyi tədris planı' : 'The curriculum plan into which the subject will be entered'}</span>
                         </div>
-                        <select
-                          value={targetProgramIdForSyllabus}
-                          onChange={e => setTargetProgramIdForSyllabus(e.target.value)}
-                          className="px-3 py-1.5 bg-white border border-teal-200 rounded-xl text-xs focus:outline-none font-semibold"
-                        >
-                          {programs.filter(p => !p.archived).map(p => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                          ))}
-                        </select>
+                        <div className="flex flex-col gap-2">
+                          <input
+                            type="text"
+                            value={programSearchForAdd}
+                            onChange={e => setProgramSearchForAdd(e.target.value)}
+                            placeholder={language === 'AZ' ? 'Proqram axtar...' : 'Search program...'}
+                            className="px-3 py-1 border border-teal-200 rounded-lg text-[10px] focus:outline-none"
+                          />
+                          <select
+                            value={targetProgramIdForSyllabus}
+                            onChange={e => setTargetProgramIdForSyllabus(e.target.value)}
+                            className="px-3 py-1.5 bg-white border border-teal-200 rounded-xl text-xs focus:outline-none font-semibold"
+                          >
+                            {programs
+                              .filter(p => !p.archived && (
+                                p.name.toLowerCase().includes(programSearchForAdd.toLowerCase()) ||
+                                p.id.toLowerCase().includes(programSearchForAdd.toLowerCase())
+                              ))
+                              .map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                          </select>
+                        </div>
                       </div>
 
                       <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
@@ -870,20 +886,42 @@ export default function TeacherPanel({
               {syllabusInputMode === 'manual' && (
                 <form onSubmit={handleAddSyllabusSubmit} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div>
+                     <div>
                       <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'AİD OLDUĞU PROQRAM' : 'CORRESPONDING PROGRAM'}</label>
+                      <input
+                        type="text"
+                        value={programSearchForAdd}
+                        onChange={e => setProgramSearchForAdd(e.target.value)}
+                        placeholder={language === 'AZ' ? 'Proqram axtar...' : 'Search program...'}
+                        className="w-full px-3 py-1 bg-white rounded-lg border border-slate-200 text-[10px] mb-1 focus:outline-none"
+                      />
                       <select
                         value={syllProgramId}
-                        onChange={e => setSyllProgramId(e.target.value)}
+                        onChange={e => {
+                          setSyllProgramId(e.target.value);
+                          setSelectedSyllabusIdForAdd('');
+                        }}
                         className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/20"
                       >
-                        {programs.filter(p => !p.archived).map(p => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
+                        {programs
+                          .filter(p => !p.archived && (
+                            p.name.toLowerCase().includes(programSearchForAdd.toLowerCase()) ||
+                            p.id.toLowerCase().includes(programSearchForAdd.toLowerCase())
+                          ))
+                          .map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
                       </select>
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNN SEÇİN *' : 'SELECT SUBJECT *'}</label>
+                      <input
+                        type="text"
+                        value={syllabusSearchForAdd}
+                        onChange={e => setSyllabusSearchForAdd(e.target.value)}
+                        placeholder={language === 'AZ' ? 'Fənn axtar...' : 'Search subject...'}
+                        className="w-full px-3 py-1 bg-white rounded-lg border border-slate-200 text-[10px] mb-1 focus:outline-none"
+                      />
                       <select
                         value={selectedSyllabusIdForAdd}
                         onChange={e => {
@@ -904,7 +942,10 @@ export default function TeacherPanel({
                       >
                         <option value="">{language === 'AZ' ? '-- Fənn Seçin --' : '-- Select Subject --'}</option>
                         {(syllabi || [])
-                          .filter(s => s.programId === syllProgramId && !s.archived)
+                          .filter(s => s.programId === syllProgramId && !s.archived && (
+                            s.name.toLowerCase().includes(syllabusSearchForAdd.toLowerCase()) ||
+                            s.code.toLowerCase().includes(syllabusSearchForAdd.toLowerCase())
+                          ))
                           .map(s => (
                             <option key={s.id} value={s.id}>{s.code} — {s.name}</option>
                           ))

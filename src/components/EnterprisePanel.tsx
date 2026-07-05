@@ -71,9 +71,22 @@ export default function EnterprisePanel({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [programSearch, setProgramSearch] = useState('');
+  const [syllabusSearch, setSyllabusSearch] = useState('');
 
-  // Filter syllabi dynamically based on selected program and ensure not archived
-  const filteredSyllabi = syllabi.filter(s => s.programId === selectedProgramId && !s.archived);
+  // Filter programs based on search input
+  const filteredActivePrograms = activePrograms.filter(p => 
+    p.name.toLowerCase().includes(programSearch.toLowerCase()) ||
+    p.id.toLowerCase().includes(programSearch.toLowerCase())
+  );
+
+  // Filter syllabi dynamically based on selected program, archived status and search input
+  const filteredSyllabi = syllabi.filter(s => 
+    s.programId === selectedProgramId && 
+    !s.archived &&
+    (s.name.toLowerCase().includes(syllabusSearch.toLowerCase()) || 
+     s.code.toLowerCase().includes(syllabusSearch.toLowerCase()))
+  );
 
   // Filter suggestions submitted by this enterprise
   const enterpriseSuggestions = suggestions.filter(
@@ -204,56 +217,68 @@ export default function EnterprisePanel({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
-                  {language === 'AZ' ? 'Mövzu Kateqoriyası *' : 'Topic Category *'}
-                </label>
-                <select
-                  value={type}
-                  onChange={e => setType(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-xs transition-all bg-white text-slate-700 font-semibold cursor-pointer"
-                >
-                  <option value="Bazar tələbi">
-                    {language === 'AZ' ? 'Müasir Bazar Tələbi' : 'Modern Market Demand'}
-                  </option>
-                  <option value="Təcrübə qiymətləndirilməsi">
-                    {language === 'AZ' ? 'Tələbə Təcrübəsinin Qiymətləndirilməsi' : 'Student Internship Evaluation'}
-                  </option>
-                  <option value="Pedaqoji təklif">
-                    {language === 'AZ' ? 'Tədris Metodologiyası təklifi' : 'Teaching Methodology Suggestion'}
-                  </option>
-                  <option value="Digər">
-                    {language === 'AZ' ? 'Digər İctimai Tələb' : 'Other Public Demand'}
-                  </option>
-                </select>
-              </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                {language === 'AZ' ? 'Mövzu Kateqoriyası *' : 'Topic Category *'}
+              </label>
+              <select
+                value={type}
+                onChange={e => setType(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-xs transition-all bg-white text-slate-700 font-semibold cursor-pointer"
+              >
+                <option value="Bazar tələbi">
+                  {language === 'AZ' ? 'Müasir Bazar Tələbi' : 'Modern Market Demand'}
+                </option>
+                <option value="Təcrübə qiymətləndirilməsi">
+                  {language === 'AZ' ? 'Tələbə Təcrübəsinin Qiymətləndirilməsi' : 'Student Internship Evaluation'}
+                </option>
+                <option value="Pedaqoji təklif">
+                  {language === 'AZ' ? 'Tədris Metodologiyası təklifi' : 'Teaching Methodology Suggestion'}
+                </option>
+                <option value="Digər">
+                  {language === 'AZ' ? 'Digər İctimai Tələb' : 'Other Public Demand'}
+                </option>
+              </select>
+            </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
-                  {language === 'AZ' ? 'İxtisas Proqramı *' : 'Curriculum Program *'}
-                </label>
-                <select
-                  value={selectedProgramId}
-                  onChange={e => {
-                    setSelectedProgramId(e.target.value);
-                    setSelectedSyllabusId('');
-                  }}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-xs transition-all bg-white text-slate-700 font-semibold cursor-pointer"
-                >
-                  {activePrograms.map(prog => (
-                    <option key={prog.id} value={prog.id}>
-                      {prog.name.length > 25 ? `${prog.name.slice(0, 25)}...` : prog.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                {language === 'AZ' ? 'İxtisas Proqramı Seçin *' : 'Select Curriculum Program *'}
+              </label>
+              <input
+                type="text"
+                value={programSearch}
+                onChange={e => setProgramSearch(e.target.value)}
+                placeholder={language === 'AZ' ? 'İxtisas proqramı axtar (məs: İbtidai sinif)...' : 'Search curriculum program (e.g. Primary)...'}
+                className="w-full px-4 py-2 rounded-xl border border-slate-200 mb-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-xs font-medium"
+              />
+              <select
+                value={selectedProgramId}
+                onChange={e => {
+                  setSelectedProgramId(e.target.value);
+                  setSelectedSyllabusId('');
+                }}
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-xs transition-all bg-white text-slate-700 font-semibold cursor-pointer"
+              >
+                {filteredActivePrograms.map(prog => (
+                  <option key={prog.id} value={prog.id}>
+                    {prog.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
                 {language === 'AZ' ? 'Aid Olduğu Fənn (Sillabus)' : 'Related Course (Syllabus)'} <span className="text-slate-400 text-[10px] font-normal">({language === 'AZ' ? 'Könüllü' : 'Optional'})</span>
               </label>
+              <input
+                type="text"
+                value={syllabusSearch}
+                onChange={e => setSyllabusSearch(e.target.value)}
+                placeholder={language === 'AZ' ? 'Fənn axtar (məs: Pedaqogika)...' : 'Search course (e.g. Pedagogy)...'}
+                className="w-full px-4 py-2 rounded-xl border border-slate-200 mb-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-xs font-medium"
+              />
               <select
                 value={selectedSyllabusId}
                 onChange={e => setSelectedSyllabusId(e.target.value)}

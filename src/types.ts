@@ -38,6 +38,7 @@ export interface Syllabus {
   description?: string;
   syllabusFiles?: string[];
   topics?: string[];
+  isUploaded?: boolean;
 }
 
 export interface SuggestionCase {

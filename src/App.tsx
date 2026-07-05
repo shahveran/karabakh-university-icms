@@ -837,6 +837,48 @@ export default function App() {
                 dbState?.syllabi || []
               );
 
+              // Only pass claimed/active programs to student, enterprise, observer views
+              const claimedPrograms = (dbState?.programs || []).filter(p => {
+                if (p.archived) return false;
+                const hasHeads = p.allowedHeads && p.allowedHeads.length > 0;
+                const hasCreator = p.createdBy && p.createdBy !== 'admin@qu.edu.az' && p.createdBy !== 'admin@karabakh.edu.az';
+                return hasHeads || hasCreator;
+              });
+
+              // Only pass active/uploaded syllabi to student, enterprise, observer views
+              const activeSyllabi = (dbState?.syllabi || []).filter(s => {
+                if (s.archived) return false;
+                return s.isUploaded === true;
+              });
+
+              // For teachers: pass active/uploaded syllabi OR any syllabus where they are assigned as primary/co-teacher (even if placeholder/not yet uploaded, so they can claim it)
+              const teacherSyllabi = (dbState?.syllabi || []).filter(s => {
+                if (s.archived) return false;
+                if (s.isUploaded) return true;
+                const userEmail = currentUserToPass?.email?.toLowerCase().trim();
+                if (!userEmail) return false;
+                const isPrimaryTeacher = s.teacherEmail && s.teacherEmail.toLowerCase().trim() === userEmail;
+                const isCoTeacher = s.teacherEmails && s.teacherEmails.some(e => e.toLowerCase().trim() === userEmail);
+                return isPrimaryTeacher || isCoTeacher;
+              });
+
+              // For teachers: show claimed programs or programs containing their assigned syllabi
+              const teacherPrograms = (dbState?.programs || []).filter(p => {
+                if (p.archived) return false;
+                const hasHeads = p.allowedHeads && p.allowedHeads.length > 0;
+                const hasCreator = p.createdBy && p.createdBy !== 'admin@qu.edu.az' && p.createdBy !== 'admin@karabakh.edu.az';
+                if (hasHeads || hasCreator) return true;
+                
+                const userEmail = currentUserToPass?.email?.toLowerCase().trim();
+                if (!userEmail) return false;
+                return (dbState?.syllabi || []).some(s => {
+                  if (s.programId !== p.id || s.archived) return false;
+                  const isPrimaryTeacher = s.teacherEmail && s.teacherEmail.toLowerCase().trim() === userEmail;
+                  const isCoTeacher = s.teacherEmails && s.teacherEmails.some(e => e.toLowerCase().trim() === userEmail);
+                  return isPrimaryTeacher || isCoTeacher;
+                });
+              });
+
               return (
                 <AnimatePresence mode="wait">
                   <motion.div
@@ -856,8 +898,8 @@ export default function App() {
                     {activeRoleToRender === 'student' && (
                       <StudentPanel
                         currentUser={currentUserToPass!}
-                        programs={dbState?.programs || []}
-                        syllabi={dbState?.syllabi || []}
+                        programs={claimedPrograms}
+                        syllabi={activeSyllabi}
                         suggestions={dbState?.suggestions || []}
                         onSubmitSuggestion={handleSubmitSuggestion}
                       />
@@ -866,8 +908,8 @@ export default function App() {
                     {activeRoleToRender === 'enterprise' && (
                       <EnterprisePanel
                         currentUser={currentUserToPass!}
-                        programs={dbState?.programs || []}
-                        syllabi={dbState?.syllabi || []}
+                        programs={claimedPrograms}
+                        syllabi={activeSyllabi}
                         suggestions={dbState?.suggestions || []}
                         onSubmitSuggestion={handleSubmitSuggestion}
                       />
@@ -899,8 +941,8 @@ export default function App() {
                     {activeRoleToRender === 'teacher' && (
                       <TeacherPanel
                         currentUser={currentUserToPass!}
-                        programs={dbState?.programs || []}
-                        syllabi={dbState?.syllabi || []}
+                        programs={teacherPrograms}
+                        syllabi={teacherSyllabi}
                         suggestions={dbState?.suggestions || []}
                         users={dbState?.users || []}
                         referenceDocs={visibleReferenceDocs}
@@ -918,8 +960,8 @@ export default function App() {
                     {activeRoleToRender === 'observer' && (
                       <ObserverPanel
                         currentUser={currentUserToPass!}
-                        programs={dbState?.programs || []}
-                        syllabi={dbState?.syllabi || []}
+                        programs={claimedPrograms}
+                        syllabi={activeSyllabi}
                         suggestions={dbState?.suggestions || []}
                         users={dbState?.users || []}
                         referenceDocs={visibleReferenceDocs}

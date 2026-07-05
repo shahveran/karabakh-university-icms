@@ -53,14 +53,19 @@ export default function ProgramHeadPanel({
   const { language, t } = useLanguage();
 
   const myAllowedPrograms = (programs || []).filter(p => {
-    // If the program has no assigned heads and no creator, it's open to all heads (e.g. Excel import)
-    if ((!p.allowedHeads || p.allowedHeads.length === 0) && !p.createdBy) return true;
-    
+    if (p.archived) return false;
     const curEmail = currentUser?.email?.toLowerCase().trim();
     if (!curEmail) return false;
     const isCreator = p.createdBy && p.createdBy.toLowerCase().trim() === curEmail;
     const isAllowed = p.allowedHeads ? p.allowedHeads.some(email => email.toLowerCase().trim() === curEmail) : false;
     return isCreator || isAllowed;
+  });
+
+  const unclaimedOfficialPrograms = (programs || []).filter(p => {
+    if (p.archived) return false;
+    const hasHeads = p.allowedHeads && p.allowedHeads.length > 0;
+    const hasCreator = p.createdBy && p.createdBy !== 'admin@qu.edu.az' && p.createdBy !== 'admin@karabakh.edu.az';
+    return !hasHeads && !hasCreator;
   });
 
   // Tabs: 'programs' | 'suggestions' | 'ai' | 'references'
@@ -74,6 +79,9 @@ export default function ProgramHeadPanel({
   const [progDesc, setProgDesc] = useState('');
   const [parsedRawText, setParsedRawText] = useState('');
   const [parsedHtml, setParsedHtml] = useState('');
+  const [selectedProgramIdForAdd, setSelectedProgramIdForAdd] = useState('');
+  const [programSearchForAdd, setProgramSearchForAdd] = useState('');
+  const [syllabusSearchForAdd, setSyllabusSearchForAdd] = useState('');
 
   // Syllabus Form States
   const [showAddSyllabus, setShowAddSyllabus] = useState(false);
@@ -236,16 +244,29 @@ export default function ProgramHeadPanel({
       if (parsedResult.documentType === 'program') {
         const fullDesc = `${parsedResult.summary}\n\nHədəflər:\n${parsedResult.targets.map(t => `- ${t}`).join('\n')}\n\nAçar mövzular:\n${parsedResult.keywords.join(', ')}`;
         const finalHeads = progAllowedHeads.includes(currentUser.email) ? progAllowedHeads : [currentUser.email, ...progAllowedHeads];
-        const newProg = await onAddProgram(parsedResult.name, fullDesc, 240, currentUser.email, finalHeads);
+        
+        let newProgId = '';
+        if (selectedProgramIdForAdd) {
+          await onUpdateProgram(selectedProgramIdForAdd, {
+            name: parsedResult.name,
+            description: fullDesc,
+            allowedHeads: finalHeads,
+            updateComment: language === 'AZ' ? 'Proqram rəhbəri tərəfindən sənəd yükləndi və sahiplənildi' : 'Document uploaded and claimed by program head'
+          });
+          newProgId = selectedProgramIdForAdd;
+        } else {
+          const newProg = await onAddProgram(parsedResult.name, fullDesc, 240, currentUser.email, finalHeads);
+          newProgId = newProg?.id || '';
+        }
         
         // Auto-upload program file to reference documents
-        if (newProg && newProg.id) {
+        if (newProgId) {
           try {
             await onAddReferenceDoc(
               parsedDocName || parsedResult.name,
               parsedRawText || fullDesc,
               'program',
-              newProg.id,
+              newProgId,
               '45 KB',
               parsedHtml || undefined
             );
@@ -254,7 +275,7 @@ export default function ProgramHeadPanel({
           }
         }
 
-        setActionSuccess(language === 'AZ' ? 'Word-dən təhlil edilmiş yeni İxtisas Proqramı uğurla daxil edildi və avtomatik referans sənədlərə yükləndi!' : 'New Specialty Program parsed from Word successfully added and automatically uploaded to reference documents!');
+        setActionSuccess(language === 'AZ' ? 'Word-dən təhlil edilmiş İxtisas Proqramı uğurla daxil edildi!' : 'Specialty Program parsed from Word successfully added!');
       } else {
         const syllabusProgramId = targetProgramIdForSyllabus || myAllowedPrograms[0]?.id || programs[0]?.id;
         if (!syllabusProgramId) {
@@ -262,24 +283,39 @@ export default function ProgramHeadPanel({
           return;
         }
         const fullContent = `Məcmuə:\n${parsedResult.summary}\n\nHədəflər:\n${parsedResult.targets.map(t => `- ${t}`).join('\n')}\n\nAçar fəsillər / mövzular (Key-lər):\n${parsedResult.keywords.map(k => `- ${k}`).join('\n')}`;
-        const newSyll = await onAddSyllabus(
-          syllabusProgramId,
-          parsedResult.suggestedCode || 'PED-101',
-          parsedResult.name,
-          fullContent,
-          6,
-          syllTeacherEmails[0] || undefined,
-          syllTeacherEmails
-        );
+        
+        let newSyllId = selectedSyllabusIdForAdd;
+        if (selectedSyllabusIdForAdd) {
+          await onUpdateSyllabus(selectedSyllabusIdForAdd, {
+            name: parsedResult.name,
+            code: parsedResult.suggestedCode || 'PED-101',
+            content: fullContent,
+            credits: 6,
+            teacherEmail: syllTeacherEmails[0] || null,
+            teacherEmails: syllTeacherEmails,
+            updateComment: language === 'AZ' ? 'Fənn sillabusu Word sənədindən yükləndi' : 'Subject syllabus uploaded from Word document'
+          });
+        } else {
+          const newSyll = await onAddSyllabus(
+            syllabusProgramId,
+            parsedResult.suggestedCode || 'PED-101',
+            parsedResult.name,
+            fullContent,
+            6,
+            syllTeacherEmails[0] || undefined,
+            syllTeacherEmails
+          );
+          newSyllId = newSyll?.id || '';
+        }
 
         // Auto-upload syllabus file to reference documents
-        if (newSyll && newSyll.id) {
+        if (newSyllId) {
           try {
             await onAddReferenceDoc(
               parsedDocName || parsedResult.name,
               parsedRawText || fullContent,
               'syllabus',
-              newSyll.id,
+              newSyllId,
               '45 KB',
               parsedHtml || undefined
             );
@@ -288,12 +324,14 @@ export default function ProgramHeadPanel({
           }
         }
 
-        setActionSuccess(language === 'AZ' ? 'Word-dən təhlil edilmiş yeni fənn sillabusu ixtisasa uğurla integurasiya edildi və avtomatik referans sənədlərə yükləndi!' : 'New subject syllabus parsed from Word successfully integrated into curriculum and automatically uploaded to reference documents!');
+        setActionSuccess(language === 'AZ' ? 'Word-dən təhlil edilmiş fənn sillabusu uğurla inteqrasiya edildi!' : 'Subject syllabus parsed from Word successfully integrated!');
       }
       setParsedResult(null);
       setParsedDocName('');
       setSyllTeacherEmails([]);
       setProgAllowedHeads([]);
+      setSelectedProgramIdForAdd('');
+      setSelectedSyllabusIdForAdd('');
       setTimeout(() => setActionSuccess(''), 5000);
     } catch (err: any) {
       setActionError(err.message || (language === 'AZ' ? 'Sistemə daxil edilərkən xəta yarandı.' : 'An error occurred while entering into the system.'));
@@ -315,21 +353,37 @@ export default function ProgramHeadPanel({
     "AI is preparing suggested modifications and scenario solutions..."
   ];
 
+
+
   const handleAddProgramSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!progName.trim() || !progDesc.trim()) return;
     try {
       const finalHeads = progAllowedHeads.includes(currentUser.email) ? progAllowedHeads : [currentUser.email, ...progAllowedHeads];
-      const newProg = await onAddProgram(progName, progDesc, progCredits, currentUser.email, finalHeads);
+      
+      let newProgId = '';
+      if (selectedProgramIdForAdd) {
+        await onUpdateProgram(selectedProgramIdForAdd, {
+          name: progName,
+          description: progDesc,
+          totalCredits: progCredits,
+          allowedHeads: finalHeads,
+          updateComment: language === 'AZ' ? 'Proqram rəhbəri tərəfindən məlumatlar yükləndi və təsdiqləndi' : 'Program details uploaded and approved by head'
+        });
+        newProgId = selectedProgramIdForAdd;
+      } else {
+        const newProg = await onAddProgram(progName, progDesc, progCredits, currentUser.email, finalHeads);
+        newProgId = newProg?.id || '';
+      }
       
       // Auto-upload manual program to reference documents
-      if (newProg && newProg.id) {
+      if (newProgId) {
         try {
           await onAddReferenceDoc(
             progName.trim(),
             progDesc.trim(),
             'program',
-            newProg.id,
+            newProgId,
             `${(progDesc.length / 1024).toFixed(1)} KB`
           );
         } catch (docErr) {
@@ -337,11 +391,12 @@ export default function ProgramHeadPanel({
         }
       }
 
-      setActionSuccess(language === 'AZ' ? 'Yeni ixtisas proqramı uğurla əlavə edildi və avtomatik referans sənədlərə yükləndi!' : 'New specialty program successfully added and automatically uploaded to reference documents!');
+      setActionSuccess(language === 'AZ' ? 'İxtisas proqramı uğurla təyin edildi/əlavə edildi!' : 'Specialty program successfully assigned/added!');
       setProgName('');
       setProgDesc('');
       setProgCredits(240);
       setProgAllowedHeads([]);
+      setSelectedProgramIdForAdd('');
       setShowAddProgram(false);
       setTimeout(() => setActionSuccess(''), 5000);
     } catch (err: any) {
@@ -363,33 +418,50 @@ export default function ProgramHeadPanel({
         .map(f => f.trim())
         .filter(f => f.length > 0);
 
-      await onUpdateSyllabus(selectedSyllabusIdForAdd, {
-        name: syllName,
-        code: syllCode,
-        content: syllContent,
-        credits: syllCredits,
-        teacherEmail: syllTeacherEmails[0] || null,
-        teacherEmails: syllTeacherEmails,
-        description: syllDescription,
-        topics: parsedTopics,
-        syllabusFiles: parsedFiles,
-        updateComment: language === 'AZ' ? 'Yeni sillabus məzmunu daxil edildi' : 'New syllabus content submitted'
-      });
+      let finalSyllId = selectedSyllabusIdForAdd;
+
+      if (selectedSyllabusIdForAdd === 'new') {
+        const newSyll = await onAddSyllabus(
+          syllProgramId,
+          syllCode,
+          syllName,
+          syllContent,
+          syllCredits,
+          syllTeacherEmails[0] || undefined,
+          syllTeacherEmails
+        );
+        finalSyllId = newSyll?.id || '';
+      } else {
+        await onUpdateSyllabus(selectedSyllabusIdForAdd, {
+          name: syllName,
+          code: syllCode,
+          content: syllContent,
+          credits: syllCredits,
+          teacherEmail: syllTeacherEmails[0] || null,
+          teacherEmails: syllTeacherEmails,
+          description: syllDescription,
+          topics: parsedTopics,
+          syllabusFiles: parsedFiles,
+          updateComment: language === 'AZ' ? 'Yeni sillabus məzmunu daxil edildi' : 'New syllabus content submitted'
+        });
+      }
       
       // Auto-upload manual syllabus to reference documents
-      try {
-        await onAddReferenceDoc(
-          syllName.trim(),
-          syllContent.trim(),
-          'syllabus',
-          selectedSyllabusIdForAdd,
-          `${(syllContent.length / 1024).toFixed(1)} KB`
-        );
-      } catch (docErr) {
-        console.error("Auto-uploading manual reference document failed:", docErr);
+      if (finalSyllId) {
+        try {
+          await onAddReferenceDoc(
+            syllName.trim(),
+            syllContent.trim(),
+            'syllabus',
+            finalSyllId,
+            `${(syllContent.length / 1024).toFixed(1)} KB`
+          );
+        } catch (docErr) {
+          console.error("Auto-uploading manual reference document failed:", docErr);
+        }
       }
 
-      setActionSuccess(language === 'AZ' ? 'Yeni fənn sillabusu uğurla əlavə edildi və avtomatik referans sənədlərə yükləndi!' : 'New subject syllabus successfully added and automatically uploaded to reference documents!');
+      setActionSuccess(language === 'AZ' ? 'Yeni fənn sillabusu uğurla əlavə edildi!' : 'New subject syllabus successfully added!');
       setSyllCode('');
       setSyllName('');
       setSyllContent('');
@@ -1053,6 +1125,52 @@ export default function ProgramHeadPanel({
                         </span>
                       </div>
 
+                      {/* Select corresponding official program */}
+                      <div className="bg-emerald-50/20 p-3 rounded-xl border border-emerald-100/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-left">
+                        <div className="space-y-0.5">
+                          <label className="block text-[10px] font-bold text-emerald-950 uppercase tracking-wider">
+                            {language === 'AZ' ? 'BİRLƏŞDİRİLƏCƏK RƏSMİ İXTİSAS PROQRAMI' : 'ASSOCIATED OFFICIAL SPECIALTY PROGRAM'}
+                          </label>
+                          <span className="text-[10px] text-slate-400">
+                            {language === 'AZ' ? 'Word faylındakı məlumatların yazılacağı rəsmi ixtisas tədris planı' : 'The official specialty curriculum plan where document data will be written'}
+                          </span>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <input
+                            type="text"
+                            value={programSearchForAdd}
+                            onChange={e => setProgramSearchForAdd(e.target.value)}
+                            placeholder={language === 'AZ' ? 'Proqram axtar...' : 'Search program...'}
+                            className="px-3 py-1 border border-emerald-200 rounded-lg text-[10px] focus:outline-none"
+                          />
+                          <select
+                            value={selectedProgramIdForAdd}
+                            onChange={e => {
+                              const pId = e.target.value;
+                              setSelectedProgramIdForAdd(pId);
+                              const found = (programs || []).find(p => p.id === pId);
+                              if (found && parsedResult) {
+                                setParsedResult({
+                                  ...parsedResult,
+                                  name: found.name
+                                });
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-white border border-emerald-250 rounded-xl text-xs focus:outline-none font-bold"
+                          >
+                            <option value="">{language === 'AZ' ? '+ Yeni Müstəqil İxtisas Proqramı Kimi Yarat' : '+ Create As New Custom Specialty Program'}</option>
+                            {unclaimedOfficialPrograms
+                              .filter(p => (
+                                p.name.toLowerCase().includes(programSearchForAdd.toLowerCase()) ||
+                                p.id.toLowerCase().includes(programSearchForAdd.toLowerCase())
+                              ))
+                              .map(p => (
+                                <option key={p.id} value={p.id}>{p.name} (Rəsmi)</option>
+                              ))}
+                          </select>
+                        </div>
+                      </div>
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-left">
                         {/* Edit fields */}
                         <div className="space-y-3">
@@ -1141,6 +1259,45 @@ export default function ProgramHeadPanel({
               {/* Step 2b: Manual Form */}
               {programInputMode === 'manual' && (
                 <form onSubmit={handleAddProgramSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                  <div className="md:col-span-12">
+                    <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'RƏSMİ İXTİSAS SEÇİMİ (KÖNÜLLÜ)' : 'OFFICIAL SPECIALTY SELECTION (OPTIONAL)'}</label>
+                    <input
+                      type="text"
+                      value={programSearchForAdd}
+                      onChange={e => setProgramSearchForAdd(e.target.value)}
+                      placeholder={language === 'AZ' ? 'İxtisas proqramı axtar...' : 'Search specialty program...'}
+                      className="w-full px-3 py-1.5 bg-white rounded-lg border border-slate-250 text-xs mb-1.5 focus:outline-none"
+                    />
+                    <select
+                      value={selectedProgramIdForAdd}
+                      onChange={e => {
+                        const pId = e.target.value;
+                        setSelectedProgramIdForAdd(pId);
+                        const found = (programs || []).find(p => p.id === pId);
+                        if (found) {
+                          setProgName(found.name);
+                          setProgDesc(found.description);
+                          setProgCredits(found.totalCredits || 240);
+                        } else {
+                          setProgName('');
+                          setProgDesc('');
+                          setProgCredits(240);
+                        }
+                      }}
+                      className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-bold"
+                    >
+                      <option value="">{language === 'AZ' ? '+ Yeni Müstəqil İxtisas Proqramı Yarat' : '+ Create New Custom Specialty Program'}</option>
+                      {unclaimedOfficialPrograms
+                        .filter(p => (
+                          p.name.toLowerCase().includes(programSearchForAdd.toLowerCase()) ||
+                          p.id.toLowerCase().includes(programSearchForAdd.toLowerCase())
+                        ))
+                        .map(p => (
+                          <option key={p.id} value={p.id}>{p.name} (Rəsmi)</option>
+                        ))}
+                    </select>
+                  </div>
+
                   <div className="md:col-span-4">
                     <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'PROQRAMIN ADI' : 'PROGRAM NAME'}</label>
                     <input
@@ -1504,15 +1661,76 @@ export default function ProgramHeadPanel({
                           <label className="block text-[10px] font-bold text-emerald-950 uppercase tracking-wider">{language === 'AZ' ? 'AİD OLDUĞU İXTİSAS PROQRAMINI SEÇİN *' : 'SELECT THE CORRESPONDING SPECIALTY PROGRAM *'}</label>
                           <span className="text-[10px] text-slate-400">{language === 'AZ' ? 'Word faylındakı fənnin daxil ediləcəyi tədris planı' : 'The curriculum plan into which the subject from the Word file will be entered'}</span>
                         </div>
-                        <select
-                          value={targetProgramIdForSyllabus}
-                          onChange={e => setTargetProgramIdForSyllabus(e.target.value)}
-                          className="px-3 py-1.5 bg-white border border-emerald-200 rounded-xl text-xs focus:outline-none font-semibold"
-                        >
-                          {myAllowedPrograms.map(p => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                          ))}
-                        </select>
+                        <div className="flex flex-col gap-2">
+                          <input
+                            type="text"
+                            value={programSearchForAdd}
+                            onChange={e => setProgramSearchForAdd(e.target.value)}
+                            placeholder={language === 'AZ' ? 'Proqram axtar...' : 'Search program...'}
+                            className="px-3 py-1 border border-emerald-200 rounded-lg text-[10px] focus:outline-none"
+                          />
+                          <select
+                            value={targetProgramIdForSyllabus}
+                            onChange={e => {
+                              setTargetProgramIdForSyllabus(e.target.value);
+                              setSelectedSyllabusIdForAdd('');
+                            }}
+                            className="px-3 py-1.5 bg-white border border-emerald-200 rounded-xl text-xs focus:outline-none font-semibold"
+                          >
+                            {myAllowedPrograms
+                              .filter(p => (
+                                p.name.toLowerCase().includes(programSearchForAdd.toLowerCase()) ||
+                                p.id.toLowerCase().includes(programSearchForAdd.toLowerCase())
+                              ))
+                              .map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Select which Syllabus placeholder to claim */}
+                      <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/20 p-3 rounded-xl border border-emerald-100/30">
+                        <div className="space-y-0.5">
+                          <label className="block text-[10px] font-bold text-emerald-950 uppercase tracking-wider">{language === 'AZ' ? 'RƏSMİ FƏNN SEÇİN' : 'SELECT OFFICIAL SUBJECT'}</label>
+                          <span className="text-[10px] text-slate-400">{language === 'AZ' ? 'Sənədin birləşdiriləcəyi rəsmi fənn planı (placeholder)' : 'The official subject plan (placeholder) the document will merge into'}</span>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <input
+                            type="text"
+                            value={syllabusSearchForAdd}
+                            onChange={e => setSyllabusSearchForAdd(e.target.value)}
+                            placeholder={language === 'AZ' ? 'Fənn axtar...' : 'Search subject...'}
+                            className="px-3 py-1 border border-emerald-200 rounded-lg text-[10px] focus:outline-none"
+                          />
+                          <select
+                            value={selectedSyllabusIdForAdd}
+                            onChange={e => {
+                              const sId = e.target.value;
+                              setSelectedSyllabusIdForAdd(sId);
+                              const found = (syllabi || []).find(s => s.id === sId);
+                              if (found && parsedResult) {
+                                setParsedResult({
+                                  ...parsedResult,
+                                  name: found.name,
+                                  suggestedCode: found.code
+                                });
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-white border border-emerald-250 rounded-xl text-xs focus:outline-none font-bold"
+                          >
+                            <option value="">{language === 'AZ' ? '+ Yeni Müstəqil Fənn Kimi Yarat' : '+ Create As New Custom Subject'}</option>
+                            {(syllabi || [])
+                              .filter(s => s.programId === (targetProgramIdForSyllabus || myAllowedPrograms[0]?.id || programs[0]?.id) && !s.isUploaded && !s.archived && (
+                                s.name.toLowerCase().includes(syllabusSearchForAdd.toLowerCase()) ||
+                                s.code.toLowerCase().includes(syllabusSearchForAdd.toLowerCase())
+                              ))
+                              .map(s => (
+                                <option key={s.id} value={s.id}>{s.code} — {s.name}</option>
+                              ))
+                            }
+                          </select>
+                        </div>
                       </div>
 
                       <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
@@ -1543,18 +1761,40 @@ export default function ProgramHeadPanel({
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'AİD OLDUĞU PROQRAM' : 'CORRESPONDING PROGRAM'}</label>
+                      <input
+                        type="text"
+                        value={programSearchForAdd}
+                        onChange={e => setProgramSearchForAdd(e.target.value)}
+                        placeholder={language === 'AZ' ? 'Proqram axtar...' : 'Search program...'}
+                        className="w-full px-3 py-1 bg-white rounded-lg border border-slate-200 text-[10px] mb-1 focus:outline-none"
+                      />
                       <select
                         value={syllProgramId}
-                        onChange={e => setSyllProgramId(e.target.value)}
+                        onChange={e => {
+                          setSyllProgramId(e.target.value);
+                          setSelectedSyllabusIdForAdd('');
+                        }}
                         className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                       >
-                        {myAllowedPrograms.map(p => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
+                        {myAllowedPrograms
+                          .filter(p => (
+                            p.name.toLowerCase().includes(programSearchForAdd.toLowerCase()) ||
+                            p.id.toLowerCase().includes(programSearchForAdd.toLowerCase())
+                          ))
+                          .map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
                       </select>
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNN SEÇİN *' : 'SELECT SUBJECT *'}</label>
+                      <input
+                        type="text"
+                        value={syllabusSearchForAdd}
+                        onChange={e => setSyllabusSearchForAdd(e.target.value)}
+                        placeholder={language === 'AZ' ? 'Fənn axtar...' : 'Search subject...'}
+                        className="w-full px-3 py-1 bg-white rounded-lg border border-slate-200 text-[10px] mb-1 focus:outline-none"
+                      />
                       <select
                         value={selectedSyllabusIdForAdd}
                         onChange={e => {
@@ -1568,39 +1808,58 @@ export default function ProgramHeadPanel({
                           } else {
                             setSyllCode('');
                             setSyllName('');
+                            setSyllCredits(6);
                           }
                         }}
                         className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-bold"
                         required
                       >
-                        <option value="">{language === 'AZ' ? '-- Fənn Seçin --' : '-- Select Subject --'}</option>
+                        <option value="">{language === 'AZ' ? '-- Rəsmi Fənn Seçin --' : '-- Select Official Subject --'}</option>
                         {(syllabi || [])
-                          .filter(s => s.programId === syllProgramId && !s.archived)
+                          .filter(s => s.programId === syllProgramId && !s.isUploaded && !s.archived && (
+                            s.name.toLowerCase().includes(syllabusSearchForAdd.toLowerCase()) ||
+                            s.code.toLowerCase().includes(syllabusSearchForAdd.toLowerCase())
+                          ))
                           .map(s => (
                             <option key={s.id} value={s.id}>{s.code} — {s.name}</option>
                           ))
                         }
+                        <option value="new">{language === 'AZ' ? '+ Yeni Müstəqil Fənn Yaradın' : '+ Create New Custom Subject'}</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNN KODU (OXUNMA)' : 'COURSE CODE (READONLY)'}</label>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">
+                        {selectedSyllabusIdForAdd === 'new' 
+                          ? (language === 'AZ' ? 'FƏNN KODU *' : 'COURSE CODE *')
+                          : (language === 'AZ' ? 'FƏNN KODU (OXUNMA)' : 'COURSE CODE (READONLY)')}
+                      </label>
                       <input
                         type="text"
                         value={syllCode}
-                        readOnly
-                        placeholder={language === 'AZ' ? 'Siyahıdan seçin' : 'Select from list'}
-                        className="w-full px-3 py-2 bg-slate-100 rounded-xl border border-slate-200 text-xs focus:outline-none cursor-not-allowed font-semibold text-slate-500"
+                        onChange={e => setSyllCode(e.target.value)}
+                        readOnly={selectedSyllabusIdForAdd !== 'new'}
+                        placeholder={language === 'AZ' ? 'Siyahıdan seçin və ya yazın' : 'Select from list or type'}
+                        className={`w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-semibold ${
+                          selectedSyllabusIdForAdd !== 'new' ? 'bg-slate-100 cursor-not-allowed text-slate-500' : 'bg-white'
+                        }`}
                         required
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1">{language === 'AZ' ? 'FƏNNİN ADI (OXUNMA)' : 'SUBJECT NAME (READONLY)'}</label>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">
+                        {selectedSyllabusIdForAdd === 'new' 
+                          ? (language === 'AZ' ? 'FƏNNİN ADI *' : 'SUBJECT NAME *')
+                          : (language === 'AZ' ? 'FƏNNİN ADI (OXUNMA)' : 'SUBJECT NAME (READONLY)')}
+                      </label>
                       <input
                         type="text"
                         value={syllName}
                         onChange={e => setSyllName(e.target.value)}
-                        placeholder={language === 'AZ' ? 'Məs. Rəqəmsal Pedaqogika' : 'E.g. Digital Pedagogy'}
-                        className="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                        readOnly={selectedSyllabusIdForAdd !== 'new'}
+                        placeholder={language === 'AZ' ? 'Siyahıdan seçin və ya yazın' : 'Select from list or type'}
+                        className={`w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-semibold ${
+                          selectedSyllabusIdForAdd !== 'new' ? 'bg-slate-100 cursor-not-allowed text-slate-500' : 'bg-white'
+                        }`}
                         required
                       />
                     </div>

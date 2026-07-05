@@ -1155,7 +1155,8 @@ app.post('/api/syllabi', authenticate, authorize(['admin', 'head', 'teacher']), 
     updatesLog: ['Sillabus yaradıldı.'],
     credits: isNaN(parsedCredits) ? 6 : parsedCredits,
     teacherEmail: teacherEmail || undefined,
-    teacherEmails: teacherEmails || (teacherEmail ? [teacherEmail] : [])
+    teacherEmails: teacherEmails || (teacherEmail ? [teacherEmail] : []),
+    isUploaded: true
   };
 
   db.syllabi.push(newSyllabus);
@@ -1200,7 +1201,8 @@ app.put('/api/syllabi/:id', authenticate, authorize(['admin', 'head', 'teacher']
     updatesLog: logs,
     credits: isNaN(Number(parsedCredits)) ? currentSyll.credits : parsedCredits,
     teacherEmail: teacherEmail !== undefined ? teacherEmail : currentSyll.teacherEmail,
-    teacherEmails: teacherEmails !== undefined ? teacherEmails : (teacherEmail !== undefined ? (teacherEmail ? [teacherEmail] : []) : currentSyll.teacherEmails || (currentSyll.teacherEmail ? [currentSyll.teacherEmail] : []))
+    teacherEmails: teacherEmails !== undefined ? teacherEmails : (teacherEmail !== undefined ? (teacherEmail ? [teacherEmail] : []) : currentSyll.teacherEmails || (currentSyll.teacherEmail ? [currentSyll.teacherEmail] : [])),
+    isUploaded: true
   };
 
   db.syllabi[syllabusIndex] = updatedSyllabus;
